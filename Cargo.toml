@@ -3,6 +3,9 @@ name = "fastchallange"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+log_chunk_update = []
+
 [dependencies]
 wgpu = "25"
 glutin = "0.32"

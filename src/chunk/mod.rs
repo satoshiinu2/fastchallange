@@ -32,7 +32,7 @@ pub struct ChunkManager {
 
 impl ChunkManager {
     pub const SIZE: usize = 16;
-    const MAX_REMOVALS_PER_FRAME: usize = 8;
+    const MAX_REMOVALS_PER_FRAME: usize = 100;
 
     pub fn new() -> Self {
         let (req_tx, req_rx) = mpsc::channel::<(SnappedChunkPos, usize)>();
@@ -51,7 +51,7 @@ impl ChunkManager {
         Self {
             entries: FxHashMap::default(),
             last_updated_pos: None,
-            radius: 10,
+            radius: 100,
             removal_queue: Vec::new(),
             recreate_queue: Vec::new(),
             mesh_sender: req_tx,
@@ -89,128 +89,59 @@ impl ChunkManager {
     }
 
     pub fn remove_render_chunk(&mut self, pos: SnappedChunkPos) -> bool {
-        if let Some(entry) = self.entries.remove(&pos) {
-            // self.chunk_mesh_update_queue.remove(entry);
-            // self.chunk_recreate_queue.remove((pos, entry.lod_level));
-            return true;
-        }
-
-        return false;
+        self.entries.remove(&pos).is_some()
     }
 
     pub fn update_position(&mut self, pos: DVec3) {
         let c = (pos / Self::SIZE as f64).as_i64vec3();
         let new_pos = ChunkPos::new(c.x, c.z);
 
-        match self.last_updated_pos {
-            Some(last) => {
-                let delta = new_pos - last;
-                if delta.x == 0 && delta.z == 0 {
-                    return;
-                }
-
-                info!("Chunk position updated: {:?} -> {:?}", last, new_pos);
-                self.last_updated_pos = Some(new_pos);
-
-                if delta.x.abs() > self.radius || delta.z.abs() > self.radius {
-                    info!("Jump detected, full rebuild.");
-                    self.rebuild_full(new_pos);
-                } else {
-                    self.add_incoming_chunks(last, new_pos);
-                }
+        if let Some(last) = self.last_updated_pos {
+            let delta = new_pos - last;
+            if delta.x == 0 && delta.z == 0 {
+                return;
             }
-            None => {
-                info!("Initial chunk position: {:?}", new_pos);
-                self.last_updated_pos = Some(new_pos);
-                self.rebuild_full(new_pos);
-            }
+
+            #[cfg(feature = "log_chunk_update")]
+            info!("Chunk position updated: {:?} -> {:?}", last, new_pos);
         }
 
-        // 範囲外に出たエントリを削除キューへ
-        let r = self.radius;
-        let out_of_range: Vec<_> = self
-            .entries
-            .keys()
-            .filter(|k| {
-                let d = k.0 - new_pos;
-                d.x.abs() > r || d.z.abs() > r
-            })
-            .cloned()
-            .collect();
-
-        if !out_of_range.is_empty() {
-            info!("Queuing {} chunks for removal.", out_of_range.len());
-        }
-        self.removal_queue.extend(out_of_range);
-
-        // 削除を少しずつ処理
-        let drain_count = self.removal_queue.len().min(Self::MAX_REMOVALS_PER_FRAME);
-        for key in self.removal_queue.drain(..drain_count).collect::<Vec<_>>() {
-            self.remove_render_chunk(key);
-        }
-    }
-
-    fn add_incoming_chunks(&mut self, old: ChunkPos, new: ChunkPos) {
-        let r = self.radius;
-        let dx = new.x - old.x;
-        let dz = new.z - old.z;
-
-        // X方向の新しい列
-        if dx != 0 {
-            let x = if dx > 0 { new.x + r } else { new.x - r };
-            for dz2 in -r..=r {
-                self.try_add_chunk(ChunkPos::new(x, new.z + dz2));
-            }
-        }
-
-        // Z方向の新しい列（コーナーはX側で既にカバー済みだが contains_key で弾ける）
-        if dz != 0 {
-            let z = if dz > 0 { new.z + r } else { new.z - r };
-            for dx2 in -r..=r {
-                self.try_add_chunk(ChunkPos::new(new.x + dx2, z));
-            }
-        }
-    }
-
-    fn try_add_chunk(&mut self, candidate: ChunkPos) {
-        let (snapped, lod_level, should_gen) = self.get_snapped_xzpos(candidate);
-        if !should_gen {
-            return;
-        }
-        let key = SnappedChunkPos(snapped);
-        match self.entries.get(&key) {
-            None => {
-                self.recreate_queue.push((key, lod_level));
-            }
-            Some(entry) if entry.lod_level != lod_level => {
-                // LOD変化 → 再生成
-                self.recreate_queue.push((key, lod_level));
-            }
-            _ => {}
-        }
+        self.last_updated_pos = Some(new_pos);
+        self.rebuild_full(new_pos);
     }
 
     fn rebuild_full(&mut self, center: ChunkPos) {
         let r = self.radius;
+        let mut needed: FxHashSet<SnappedChunkPos> = FxHashSet::default();
 
-        // 範囲外を削除キューへ
-        let out_of_range: Vec<_> = self
-            .entries
-            .keys()
-            .filter(|k| {
-                let d = k.0 - center;
-                d.x.abs() > r || d.z.abs() > r
-            })
-            .cloned()
-            .collect();
-        self.removal_queue.extend(out_of_range);
-
-        // 全候補をスキャン
         for dx in -r..=r {
             for dz in -r..=r {
-                self.try_add_chunk(center + ChunkPos::new(dx, dz));
+                let candidate = center + ChunkPos::new(dx, dz);
+                let (snapped, lod_level, should_gen) = self.get_snapped_xzpos(candidate);
+                if !should_gen {
+                    continue;
+                }
+                let key = SnappedChunkPos(snapped);
+                if needed.insert(key) {
+                    match self.entries.get(&key) {
+                        None => self.recreate_queue.push((key, lod_level)),
+                        Some(e) if e.lod_level != lod_level => {
+                            self.recreate_queue.push((key, lod_level));
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
+
+        // neededに含まれないものを削除キューへ
+        let to_remove: Vec<_> = self
+            .entries
+            .keys()
+            .filter(|k| !needed.contains(k))
+            .cloned()
+            .collect();
+        self.removal_queue.extend(to_remove);
     }
 }
 
