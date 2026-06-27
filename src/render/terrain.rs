@@ -1,6 +1,5 @@
 use wgpu::util::DeviceExt;
 
-use crate::render::vertex::VertexLayout;
 
 pub struct TerrainPipeline {
     pub pipeline: wgpu::RenderPipeline,
@@ -41,9 +40,20 @@ impl TerrainPipeline {
                     },
                     count: None,
                 },
-                // @binding(2) vp_matrix: uniform
+                // @binding(2) lod_level: uniform
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // @binding(3) vp_matrix: uniform
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,

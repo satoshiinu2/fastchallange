@@ -15,6 +15,7 @@ pub struct ChunkEntry {
     // gpu resources
     pub height_map_buffer: wgpu::Buffer,
     pub rel_pos_buffer: wgpu::Buffer,
+    pub lod_level_buffer: wgpu::Buffer,
     pub bind_group: wgpu::BindGroup,
 }
 impl ChunkEntry {
@@ -42,6 +43,13 @@ impl ChunkEntry {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
+        let lod_level_data = [0];
+        let lod_level_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Lod Level Uniform"),
+            contents: bytemuck::cast_slice(&lod_level_data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("ChunkEntry BindGroup"),
             layout: bind_group_layout,
@@ -56,6 +64,10 @@ impl ChunkEntry {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
+                    resource: lod_level_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
                     resource: vp_buffer.as_entire_binding(),
                 },
             ],
@@ -67,6 +79,7 @@ impl ChunkEntry {
             height_map,
             height_map_buffer,
             rel_pos_buffer,
+            lod_level_buffer,
             bind_group,
         }
     }

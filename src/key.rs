@@ -28,9 +28,9 @@ impl KeyBindings {
                 KeyCode::KeyA => self.left.is_down = T,
                 KeyCode::KeyS => self.backward.is_down = T,
                 KeyCode::KeyD => self.right.is_down = T,
-                KeyCode::ShiftLeft => self.rise.is_down = T,
-                KeyCode::ShiftRight => self.rise.is_down = T,
-                KeyCode::Space => self.descent.is_down = T,
+                KeyCode::ShiftLeft => self.descent.is_down = T,
+                KeyCode::ShiftRight => self.descent.is_down = T,
+                KeyCode::Space => self.rise.is_down = T,
                 _ => {}
             }
         }

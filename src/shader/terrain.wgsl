@@ -13,6 +13,8 @@ var<uniform> height_map: HeightMap;
 @group(0) @binding(1)
 var<uniform> rel_pos: vec3<f32>;
 @group(0) @binding(2)
+var<uniform> lod_level: u32;
+@group(0) @binding(3)
 var<uniform> vp_matrix: mat4x4<f32>;
 
 @vertex
@@ -20,9 +22,11 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOutput {
     let x = index % 16u;
     let z = index / 16u;
     let h = height_map.data[index / 4u][index % 4u];
-    let world_x = rel_pos.x + f32(x);
+    let scale = f32(1u << lod_level);
+
+    let world_x = rel_pos.x + f32(x) * scale;
     let world_y = rel_pos.y + h;
-    let world_z = rel_pos.z + f32(z);
+    let world_z = rel_pos.z + f32(z) * scale;
     var out: VertexOutput;
     out.position = vp_matrix * vec4<f32>(world_x, world_y, world_z, 1.0);
     return out;

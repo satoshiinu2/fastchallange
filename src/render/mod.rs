@@ -1,17 +1,12 @@
 use std::borrow::Cow;
 
 use glam::Mat4;
-use log::info;
-use wgpu::{
-    Device, RenderPass, ShaderModule, ShaderModuleDescriptor, ShaderSource, Texture, TextureView,
-};
+use wgpu::{Device, ShaderModule, ShaderModuleDescriptor, ShaderSource, Texture, TextureView};
 
 use crate::{
     chunk::ChunkManager,
     key::KeyBindings,
-    render::{
-        buffer::GenericRenderBuffer, camera::Camera, terrain::TerrainPipeline, vertex::VertexLayout,
-    },
+    render::{camera::Camera, terrain::TerrainPipeline},
 };
 
 pub mod buffer;
@@ -132,6 +127,11 @@ impl Renderer {
                 &entry.rel_pos_buffer,
                 0,
                 bytemuck::cast_slice(&rel.as_vec3().to_array()),
+            );
+            gpu_state.queue.write_buffer(
+                &entry.lod_level_buffer,
+                0,
+                bytemuck::cast_slice(&[entry.lod_level as u32]),
             );
         }
 
