@@ -84,10 +84,14 @@ impl ChunkManager {
         }
 
         self.last_updated_pos = Some(new_pos);
-        self.rebuild_full(new_pos);
+        self.rebuild_full();
     }
 
-    fn rebuild_full(&mut self, center: ChunkPos) {
+    pub fn rebuild_full(&mut self) {
+        let Some(center) = self.last_updated_pos else {
+            return;
+        };
+
         let mut needed: FxHashSet<SnappedChunkPos> = FxHashSet::default();
 
         for dx in -self.radius..=self.radius {
@@ -112,6 +116,26 @@ impl ChunkManager {
 
         // いらないのは消す
         self.entries.retain(|k, _| needed.contains(k));
+    }
+
+    /// 指定した最大半径（距離）までに生成されるチャンク数の概算を返す O(1) の関数
+    pub fn estimate_generated_chunks(&self) -> usize {
+        // 各LOD帯: [inner, outer) の正方形リング面積 / step^2
+        // 面積 = (2*outer+1)^2 - (2*inner+1)^2  ← 正方形の場合
+        let area = |inner: i64, outer: i64| -> i64 {
+            let o = (2 * outer + 1).pow(2);
+            let i = if inner > 0 { (2 * inner + 1).pow(2) } else { 0 };
+            o - i
+        };
+
+        let r =self.radius;
+        let lod0 = area(0, 7.min(r)) / 1; // step=1
+        let lod1 = area(8, 15.min(r).max(7)) / 4; // step=2
+        let lod2 = area(16, 31.min(r).max(15)) / 16; // step=4
+        let lod3 = area(32, 63.min(r).max(31)) / 64; // step=8
+        let lod4 = area(64, r.max(63)) / 256; // step=16
+
+        (lod0 + lod1 + lod2 + lod3 + lod4).max(0) as usize
     }
 }
 

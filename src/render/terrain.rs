@@ -1,4 +1,5 @@
 use glam::Vec4;
+use log::info;
 use wgpu::util::DeviceExt;
 
 use crate::chunk::ChunkManager;
@@ -20,7 +21,10 @@ impl TerrainPipeline {
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
         surface_format: wgpu::TextureFormat,
+        max_chunks: usize,
     ) -> Self {
+        info!("Max chunks updated to: {}", max_chunks);
+
         // 1. 最初から、新しい一括描画用（Bindingが2つ）のレイアウトを作成する
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Terrain BGL"),
@@ -112,7 +116,7 @@ impl TerrainPipeline {
 
         let global_chunks_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Global Chunks Uniform Buffer"),
-            size: (std::mem::size_of::<GpuChunkData>() * Self::MAX_CHUNKS_PER_DRAW) as u64,
+            size: (std::mem::size_of::<GpuChunkData>() * max_chunks) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -170,12 +174,12 @@ impl TerrainPipeline {
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuHeightMap {
-    pub data: [[f32; 4]; 73],
+    pub data: [f32; 292],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuShaowMap {
-    pub data: [[f32; 4]; 73],
+    pub data: [u32; 73],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -183,6 +187,7 @@ pub struct GpuChunkData {
     pub rel_pos: Vec4,            // 16バイト アライメントのためVec4
     pub lod_level: u32,           // 4バイト
     pub _padding: [u32; 3],       // 12バイトのパディング
-    pub height_map: GpuHeightMap, // 73 * 16 = 1168バイト
+    pub height_map: GpuHeightMap, // 292 * 16 = 1168バイト
     pub shadow_map: GpuShaowMap,  // 73 * 16 = 1168バイト
+    pub _padding2: [u32; 3],      // 12バイトのパディング
 }

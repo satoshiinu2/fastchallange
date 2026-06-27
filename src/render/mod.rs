@@ -27,21 +27,26 @@ pub struct Renderer {
     depth_texture: Option<Texture>,
     pub(crate) camera: Camera,
 
-    pub terrain_pipeline: TerrainPipeline,
+    terrain_pipeline: TerrainPipeline,
+    terrain_shader: ShaderModule,
 
     egui_renderer: egui_wgpu::Renderer,
 }
 
 impl Renderer {
-    pub fn new(gpu_state: &GpuState) -> Self {
-        let shader = Self::create_shader_module(
+    pub fn new(gpu_state: &GpuState, max_chunks: usize) -> Self {
+        let terrain_shader = Self::create_shader_module(
             &gpu_state.device,
             include_str!("../shader/terrain.wgsl"),
             Some("Terrain Shader"),
         );
 
-        let terrain_pipeline =
-            TerrainPipeline::new(&gpu_state.device, &shader, gpu_state.config.format);
+        let terrain_pipeline = TerrainPipeline::new(
+            &gpu_state.device,
+            &terrain_shader,
+            gpu_state.config.format,
+            max_chunks,
+        );
 
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu_state.device,
@@ -57,8 +62,18 @@ impl Renderer {
             depth_texture: None,
             camera: Camera::new(),
             terrain_pipeline,
+            terrain_shader,
             egui_renderer,
         }
+    }
+
+    pub fn rebuild_terrain_pipeline(&mut self, gpu_state: &GpuState, max_chunks: usize) {
+        self.terrain_pipeline = TerrainPipeline::new(
+            &gpu_state.device,
+            &self.terrain_shader,
+            gpu_state.config.format,
+            max_chunks,
+        );
     }
 
     pub fn resize(&mut self, width: u32, height: u32, device: &wgpu::Device) {
@@ -223,27 +238,17 @@ impl Renderer {
             let chunk_w_pos = entry.position.0.as_i64vec3() * ChunkManager::SIZE as i64;
             let rel = chunk_w_pos.as_dvec3() - self.camera.position;
 
-            // アラインメントのためにキャストしてコピー１
-            let mut padded_heights = [[0.0f32; 4]; 73];
-            let flat_src = &entry.height_map[..];
-            let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_heights);
-            flat_dst[..289].copy_from_slice(flat_src);
-
-            let mut padded_shadows = [[0.0f32; 4]; 73];
-            let flat_src = &entry.shadow_map[..];
-            let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_shadows);
-            flat_dst[..289].copy_from_slice(flat_src);
-
             chunks_to_draw.push(GpuChunkData {
                 rel_pos: rel.as_vec3().extend(0.0),
                 lod_level: entry.lod_level as u32,
                 _padding: [0; 3],
                 height_map: GpuHeightMap {
-                    data: padded_heights,
+                    data: *bytemuck::cast_ref(&entry.height_map),
                 },
                 shadow_map: GpuShaowMap {
-                    data: padded_shadows,
+                    data: *bytemuck::cast_ref(&entry.shadow_map),
                 },
+                _padding2: [0; 3],
             });
         }
 

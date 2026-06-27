@@ -1,4 +1,10 @@
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
+    time::Instant,
+};
 
 use winit::window::Window;
 
@@ -26,11 +32,12 @@ pub struct GlobalState {
 
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
+    was_changed_render_distance: AtomicU8,
 }
 impl GlobalState {
     fn new(window: Arc<Window>, gpu_state: GpuState) -> Self {
-        let renderer = Renderer::new(&gpu_state);
         let chunk_manager = ChunkManager::new();
+        let renderer = Renderer::new(&gpu_state, chunk_manager.estimate_generated_chunks());
         let perf_man = PerformanceManagers::new();
         let key_bindings = KeyBindings::new();
 
@@ -53,6 +60,7 @@ impl GlobalState {
             key_bindings,
             last_frame_time: Instant::now(),
             cursor_locked: false,
+            was_changed_render_distance: AtomicU8::new(0),
             egui_ctx,
             egui_state,
         }
@@ -87,13 +95,31 @@ impl GlobalState {
                 ));
                 ui.add_space(8.0);
 
-                ui.label(format!("Render: {:}us", self.perf_man.render.formatted()));
+                ui.label(format!("Render: {:}", self.perf_man.render.formatted()));
                 ui.label(format!(
-                    "Generation: {:}us",
+                    "Generation: {:}",
                     self.perf_man.generation.formatted()
                 ));
+
+                const CHUNK_MIN:i64=50;
+                const CHUNK_MAX:i64=300;
+
+                let response = ui.add(
+                    egui::Slider::new(&mut self.chunk_manager.radius, CHUNK_MIN..=CHUNK_MAX)
+                        .text("Render distance"),
+                );
+
+                self.chunk_manager.radius = self.chunk_manager.radius.clamp(CHUNK_MIN, CHUNK_MAX);
+
+                if response.changed() {
+                    self.was_changed_render_distance.store(1, Ordering::Relaxed);
+                }
             });
         });
+
+        if self.was_changed_render_distance.swap(0, Ordering::Relaxed) != 0 {
+            self.on_changed_render_distance();
+        }
 
         self.renderer.render(
             &mut self.perf_man,
@@ -155,6 +181,14 @@ impl GlobalState {
             // クランプ処理
             self.renderer.camera.rotation.x = self.renderer.camera.rotation.x.clamp(-89.0, 89.0);
         }
+    }
+
+    fn on_changed_render_distance(&mut self) {
+        self.chunk_manager.rebuild_full();
+        self.renderer.rebuild_terrain_pipeline(
+            &self.gpu_state,
+            self.chunk_manager.estimate_generated_chunks(),
+        )
     }
 }
 

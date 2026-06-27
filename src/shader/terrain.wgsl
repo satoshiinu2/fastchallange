@@ -9,10 +9,10 @@ struct FragOutput {
 };
 
 struct HeightMap {
-    data: array<vec4<f32>, 73>,
+    data: array<f32, 292>,
 }
 struct ShadowMap {
-    data: array<vec4<f32>, 73>,
+    data: array<u32, 73>,
 }
 
 struct ChunkData {
@@ -23,17 +23,26 @@ struct ChunkData {
     _padding2: u32,
     height_map: HeightMap,
     shadow_map: ShadowMap,
+    _padding00: u32,
+    _padding01: u32,
+    _padding02: u32,
 }
 
 @group(0) @binding(0) var<storage, read> all_chunks: array<ChunkData>;
 @group(0) @binding(1) var<uniform> vp_matrix: mat4x4<f32>;
 
 fn get_h(chunk_id: u32, i: u32) -> f32 {
-    return all_chunks[chunk_id].height_map.data[i >> 2u][i & 3u];
+    return all_chunks[chunk_id].height_map.data[i];
 }
 
 fn get_s(chunk_id: u32, i: u32) -> f32 {
-    return all_chunks[chunk_id].shadow_map.data[i >> 2u][i & 3u];
+    let word_idx = i >> 2u;
+    let byte_idx = i & 3u;
+    let packed_value = all_chunks[chunk_id].shadow_map.data[word_idx];
+
+    let raw_u8 = (packed_value >> (byte_idx * 8u)) & 0xFFu;
+
+    return f32(raw_u8) / 255.0;
 }
 
 @vertex
