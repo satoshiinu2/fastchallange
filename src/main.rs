@@ -33,6 +33,7 @@ pub struct GlobalState {
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
     was_changed_render_distance: AtomicU8,
+    acceleration_rate: f64,
 }
 impl GlobalState {
     fn new(window: Arc<Window>, gpu_state: GpuState) -> Self {
@@ -60,6 +61,7 @@ impl GlobalState {
             key_bindings,
             last_frame_time: Instant::now(),
             cursor_locked: false,
+            acceleration_rate: 100.0,
             was_changed_render_distance: AtomicU8::new(0),
             egui_ctx,
             egui_state,
@@ -71,7 +73,8 @@ impl GlobalState {
         let dt = now.duration_since(self.last_frame_time).as_secs_f64(); // 秒単位のt
         self.last_frame_time = now;
 
-        self.renderer.physics_update(&self.key_bindings, dt);
+        self.renderer
+            .physics_update(&self.key_bindings, self.acceleration_rate, dt);
 
         self.chunk_manager
             .update_position(self.renderer.camera.position);
@@ -101,8 +104,13 @@ impl GlobalState {
                     self.perf_man.generation.formatted()
                 ));
 
-                const CHUNK_MIN:i64=50;
-                const CHUNK_MAX:i64=300;
+                ui.add(
+                    egui::Slider::new(&mut self.acceleration_rate, 50.0..=500.0)
+                        .text("Acceleration rate"),
+                );
+
+                const CHUNK_MIN: i64 = 50;
+                const CHUNK_MAX: i64 = 300;
 
                 let response = ui.add(
                     egui::Slider::new(&mut self.chunk_manager.radius, CHUNK_MIN..=CHUNK_MAX)

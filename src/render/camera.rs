@@ -14,7 +14,7 @@ impl Camera {
         Self {
             position: DVec3::new(0.0, 50.0, 0.0),
             velocity: DVec3::ZERO,
-            rotation: Vec3::new(90.0, 0.0, 0.0),
+            rotation: Vec3::ZERO,
             fov: 72.0,
         }
     }
@@ -31,7 +31,7 @@ impl Camera {
         mat
     }
 
-    pub fn physics_update(&mut self, key_bind: &KeyBindings, dt: f64) {
+    pub fn physics_update(&mut self, key_bind: &KeyBindings, acceleration_rate: f64, dt: f64) {
         let mut input_vec: Vec3 = Vec3::ZERO;
 
         if key_bind.right.is_down {
@@ -60,8 +60,6 @@ impl Camera {
         acceleration.y = input_vec.y;
         acceleration.z = f32::cos(radians_z) * input_vec.z + f32::cos(radians_x) * input_vec.x;
 
-        let acceleration_rate =100.0;
-
         let acceleration = acceleration.as_dvec3() * acceleration_rate;
 
         // 加速度を速度に足す (v = v0 + a * t)
@@ -71,11 +69,21 @@ impl Camera {
         self.position += self.velocity * dt;
 
         // 操作されていなかったら減速
-        if acceleration.length_squared() < f64::EPSILON {
-            let friction = 5.0;
+        let friction = 5.0;
 
-            // v = v0 * exp(-f * dt)
-            self.velocity *= (-friction * dt).exp();
+        // v = v0 * exp(-f * dt)
+        let damping = (-friction * dt).exp();
+
+        if acceleration.x.abs() < f64::EPSILON || acceleration.x * self.velocity.x < 0.0 {
+            self.velocity.x *= damping;
+        }
+
+        if acceleration.y.abs() < f64::EPSILON || acceleration.y * self.velocity.y < 0.0 {
+            self.velocity.y *= damping;
+        }
+
+        if acceleration.z.abs() < f64::EPSILON || acceleration.z * self.velocity.z < 0.0 {
+            self.velocity.z *= damping;
         }
     }
 }

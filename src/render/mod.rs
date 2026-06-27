@@ -304,8 +304,8 @@ impl Renderer {
         }
         drop(pass);
     }
-    pub fn physics_update(&mut self, key_bind: &KeyBindings, dt: f64) {
-        self.camera.physics_update(key_bind, dt);
+    pub fn physics_update(&mut self, key_bind: &KeyBindings, acceleration_rate: f64, dt: f64) {
+        self.camera.physics_update(key_bind, acceleration_rate, dt);
     }
 }
 

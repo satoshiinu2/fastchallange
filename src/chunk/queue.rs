@@ -6,13 +6,13 @@ use rayon::prelude::*;
 
 impl ChunkManager {
     pub fn flush_queues(&mut self, perf_man: &mut PerformanceManagers) {
-        let mut gen_perf_man= perf_man.generation.start();
-        
+        let mut gen_perf_man = perf_man.generation.start();
+
         let generator = &self.generator;
 
         let results: Vec<_> = self
             .recreate_queue
-            .drain(..)
+            .drain()
             .collect::<Vec<_>>()
             .into_par_iter()
             .map(|(pos, lod)| generator.generate_chunk(pos, lod))
