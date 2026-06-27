@@ -211,6 +211,44 @@ impl Renderer {
 
         self.terrain_pipeline.update_vp(&gpu_state.queue, &vp);
 
+        // 1. 存在する全チャンクのデータを1つの大きなVecに一気に回収する
+        let mut chunks_to_draw = Vec::new();
+        for entry in chunk_manager.entries.values() {
+            if chunks_to_draw.len() >= TerrainPipeline::MAX_CHUNKS_PER_DRAW {
+                break;
+            }
+
+            let chunk_w_pos = entry.position.0.as_i64vec3() * ChunkManager::SIZE as i64;
+            let rel = chunk_w_pos.as_dvec3() - self.camera.position;
+
+            // アラインメントのためにキャストしてコピー１
+            let mut padded_heights = [[0.0f32; 4]; 73];
+            let flat_src = &entry.height_map[..];
+            let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_heights);
+            flat_dst[..289].copy_from_slice(flat_src);
+
+            chunks_to_draw.push(GpuChunkData {
+                rel_pos: rel.as_vec3().extend(0.0),
+                lod_level: entry.lod_level as u32,
+                _padding: [0; 3],
+                height_map: GpuHeightMap {
+                    data: padded_heights,
+                },
+            });
+        }
+
+        let total_chunks = chunks_to_draw.len() as u32;
+
+        // 2. 集まった全データを「1回だけ」でバッファに一括転送
+        if total_chunks > 0 {
+            gpu_state.queue.write_buffer(
+                &self.terrain_pipeline.global_chunks_buffer,
+                0,
+                bytemuck::cast_slice(&chunks_to_draw),
+            );
+        }
+
+        // 3. レンダーパスを開始（元のシンプルな構造に戻す）
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Main Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -238,68 +276,19 @@ impl Renderer {
             ..Default::default()
         });
 
-        pass.set_pipeline(&self.terrain_pipeline.pipeline);
-        pass.set_index_buffer(
-            self.terrain_pipeline.index_buffer.slice(..),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.set_bind_group(0, &self.terrain_pipeline.global_bind_group, &[]);
-
-        let mut chunks_to_draw = Vec::new();
-        for entry in chunk_manager.entries.values() {
-               let chunk_w_pos = entry.position.0.as_i64vec3() * ChunkManager::SIZE as i64;
-            let rel = chunk_w_pos.as_dvec3() - self.camera.position;
-
-            let mut padded_heights = [[0.0f32; 4]; 73];
-
-            // アラインメントのためにキャストしてコピー
-            let flat_src = &entry.height_map[..];
-            let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_heights);
-            flat_dst[..289].copy_from_slice(flat_src);
-
-            chunks_to_draw.push(GpuChunkData {
-                rel_pos: rel.as_vec3().extend(0.0),
-                lod_level: entry.lod_level as u32,
-                _padding: [0; 3],
-                height_map: GpuHeightMap {
-                    data: padded_heights,
-                },
-            });
-
-            if chunks_to_draw.len() == TerrainPipeline::MAX_CHUNKS_PER_DRAW {
-                gpu_state.queue.write_buffer(
-                    &self.terrain_pipeline.global_chunks_buffer,
-                    0,
-                    bytemuck::cast_slice(&chunks_to_draw),
-                );
-
-                pass.draw_indexed(
-                    0..self.terrain_pipeline.index_count,
-                    0,
-                    0..chunks_to_draw.len() as u32,
-                );
-
-                chunks_to_draw.clear();
-            }
-        }
-
-        // ループ終了後、中途半端に残ったデータあれば最後に描画
-        if !chunks_to_draw.is_empty() {
-            gpu_state.queue.write_buffer(
-                &self.terrain_pipeline.global_chunks_buffer,
-                0,
-                bytemuck::cast_slice(&chunks_to_draw),
+        if total_chunks > 0 {
+            pass.set_pipeline(&self.terrain_pipeline.pipeline);
+            pass.set_index_buffer(
+                self.terrain_pipeline.index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
             );
+            pass.set_bind_group(0, &self.terrain_pipeline.global_bind_group, &[]);
 
-            pass.draw_indexed(
-                0..self.terrain_pipeline.index_count,
-                0,
-                0..chunks_to_draw.len() as u32,
-            );
+            // 💥 全体のチャンク数（total_chunks）を指定して「たった1回」描画を呼び出す！
+            pass.draw_indexed(0..self.terrain_pipeline.index_count, 0, 0..total_chunks);
         }
         drop(pass);
     }
-
     pub fn physics_update(&mut self, key_bind: &KeyBindings, dt: f64) {
         self.camera.physics_update(key_bind, dt);
     }

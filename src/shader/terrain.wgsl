@@ -21,7 +21,7 @@ struct ChunkData {
     height_map: HeightMap,
 }
 
-@group(0) @binding(0) var<uniform> all_chunks: array<ChunkData, 48>;
+@group(0) @binding(0) var<storage, read> all_chunks: array<ChunkData>;
 @group(0) @binding(1) var<uniform> vp_matrix: mat4x4<f32>;
 
 fn get_h(chunk_id: u32, i: u32) -> f32 {
@@ -35,7 +35,7 @@ fn vs_main(
 ) -> VertexOutput {
     let x = index % 17u;
     let z = index / 17u;
-    let h = get_h(chunk_id, index); 
+    let h = get_h(chunk_id, index);
 
     // 現在処理しているチャンクのデータを配列から引っ張る
     let chunk = all_chunks[chunk_id];

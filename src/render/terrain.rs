@@ -1,4 +1,3 @@
-
 use glam::Vec4;
 use wgpu::util::DeviceExt;
 
@@ -16,9 +15,9 @@ pub struct TerrainPipeline {
 }
 
 impl TerrainPipeline {
-    pub const MAX_CHUNKS_PER_DRAW: usize = 48;
+    pub const MAX_CHUNKS_PER_DRAW: usize = 2048;
 
-pub fn new(
+    pub fn new(
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
         surface_format: wgpu::TextureFormat,
@@ -32,7 +31,7 @@ pub fn new(
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -117,7 +116,7 @@ pub fn new(
         let global_chunks_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Global Chunks Uniform Buffer"),
             size: (std::mem::size_of::<GpuChunkData>() * Self::MAX_CHUNKS_PER_DRAW) as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -147,7 +146,7 @@ pub fn new(
             global_bind_group,
         }
     }
-    
+
     pub fn build_grid_indices(n: u32) -> Vec<u32> {
         let mut indices = Vec::with_capacity(((n - 1) * (n - 1) * 6) as usize);
         for z in 0..n - 1 {
