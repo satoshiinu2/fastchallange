@@ -74,16 +74,30 @@ impl ApplicationHandler for App {
                 global_state.resize(size.width, size.height);
             }
 
-            WindowEvent::KeyboardInput { event, .. } => {
-                let key = event.physical_key;
-                match event.state {
-                    ElementState::Pressed => global_state.key_down(key),
-                    ElementState::Released => global_state.key_up(key),
+            WindowEvent::KeyboardInput { .. }
+            | WindowEvent::MouseInput { .. }
+            | WindowEvent::CursorMoved { .. }
+            | WindowEvent::MouseWheel { .. } => {
+                let response = global_state
+                    .egui_state
+                    .on_window_event(&global_state.window, &event);
+                if !response.consumed {
+                    match event {
+                        WindowEvent::KeyboardInput { event, .. } => {
+                            let key = event.physical_key;
+                            match event.state {
+                                ElementState::Pressed => global_state.key_down(key),
+                                ElementState::Released => global_state.key_up(key),
+                            }
+                        }
+                        WindowEvent::MouseInput { state, button, .. } => {
+                            global_state.handle_mouse_input(state, button);
+                        }
+                        _ => {}
+                    }
                 }
             }
-            WindowEvent::MouseInput { state, button, .. } => {
-                global_state.handle_mouse_input(state, button);
-            }
+
             _ => {}
         }
     }
@@ -130,10 +144,12 @@ pub fn run_client() {
 async fn create_gpu_state(window: Arc<Window>) -> GpuState {
     let size = window.inner_size();
 
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         flags: wgpu::InstanceFlags::default(),
         backend_options: wgpu::BackendOptions::default(),
+        display: Default::default(),
+        memory_budget_thresholds: Default::default(),
     });
 
     let surface = instance.create_surface(window.clone()).unwrap();
@@ -154,6 +170,7 @@ async fn create_gpu_state(window: Arc<Window>) -> GpuState {
             required_limits: wgpu::Limits::downlevel_defaults(),
             memory_hints: Default::default(),
             trace: wgpu::Trace::Off,
+            experimental_features: Default::default(),
         })
         .await
         .expect("could not get device");

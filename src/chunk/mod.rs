@@ -1,33 +1,21 @@
-use log::{info, warn};
-use std::{
-    ops::{Add, Sub},
-    sync::mpsc,
-    thread,
-};
+use std::ops::{Add, Sub};
 
 use glam::{DVec3, I64Vec3};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::chunk::{
-    entry::ChunkEntry,
-    generate::{ChunkGenerator, ChunkMeshData},
-};
+use crate::chunk::{entry::ChunkEntry, generate::ChunkGenerator};
 
 mod entry;
 mod generate;
 mod queue;
 
 pub struct ChunkManager {
+    generator: ChunkGenerator,
+
     pub(crate) entries: FxHashMap<SnappedChunkPos, ChunkEntry>,
     last_updated_pos: Option<ChunkPos>,
     pub radius: i64,
-    removal_queue: Vec<SnappedChunkPos>,
     recreate_queue: Vec<(SnappedChunkPos, usize)>, // (pos, lod_level)
-
-    // 非同期生成用
-    mesh_sender: mpsc::Sender<(SnappedChunkPos, usize)>, // スレッドへ
-    mesh_receiver: mpsc::Receiver<ChunkMeshData>,        // スレッドから
-    in_flight: FxHashSet<SnappedChunkPos>,               // 生成中のpos
 }
 
 impl ChunkManager {
@@ -36,30 +24,12 @@ impl ChunkManager {
     const MAX_REMOVALS_PER_FRAME: usize = 100;
 
     pub fn new() -> Self {
-        let (req_tx, req_rx) = mpsc::channel::<(SnappedChunkPos, usize)>();
-        let (res_tx, res_rx) = mpsc::channel::<ChunkMeshData>();
-
-        // ワーカースレッド
-        thread::spawn(move || {
-            let generator = ChunkGenerator::new();
-            while let Ok((pos, lod)) = req_rx.recv() {
-                let height_map = generator.generate_chunk(pos, lod); // 重い処理
-                if let Err(e) = res_tx.send(height_map) {
-                    warn!("worker thread error: {}", e);
-                    break;
-                }
-            }
-        });
-
         Self {
+            generator: ChunkGenerator::new(),
             entries: FxHashMap::default(),
             last_updated_pos: None,
             radius: 100,
-            removal_queue: Vec::new(),
             recreate_queue: Vec::new(),
-            mesh_sender: req_tx,
-            mesh_receiver: res_rx,
-            in_flight: FxHashSet::default(),
         }
     }
 
@@ -128,11 +98,10 @@ impl ChunkManager {
     }
 
     fn rebuild_full(&mut self, center: ChunkPos) {
-        let r = self.radius;
         let mut needed: FxHashSet<SnappedChunkPos> = FxHashSet::default();
 
-        for dx in -r..=r {
-            for dz in -r..=r {
+        for dx in -self.radius..=self.radius {
+            for dz in -self.radius..=self.radius {
                 let candidate = center + ChunkPos::new(dx, dz);
                 let (snapped, lod_level, should_gen) = self.get_snapped_xzpos(candidate);
                 if !should_gen {
@@ -151,17 +120,8 @@ impl ChunkManager {
             }
         }
 
-        // neededに含まれないものを削除
-        let to_remove: Vec<_> = self
-            .entries
-            .keys()
-            .filter(|k| !needed.contains(k))
-            .cloned()
-            .collect();
-        for key in to_remove {
-            self.remove_render_chunk(key);
-            self.in_flight.remove(&key);
-        }
+        // いらないのは消す
+        self.entries.retain(|k, _| needed.contains(k));
     }
 }
 

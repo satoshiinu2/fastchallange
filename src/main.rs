@@ -20,12 +20,25 @@ pub struct GlobalState {
     key_bindings: KeyBindings,
     last_frame_time: Instant,
     cursor_locked: bool,
+
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
 }
 impl GlobalState {
     fn new(window: Arc<Window>, gpu_state: GpuState) -> Self {
         let renderer = Renderer::new(&gpu_state);
         let chunk_manager = ChunkManager::new();
         let key_bindings = KeyBindings::new();
+
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            None, // native_pixels_per_point
+            None, // max_texture_side
+            None, // theme
+        );
 
         Self {
             window,
@@ -35,6 +48,8 @@ impl GlobalState {
             key_bindings,
             last_frame_time: Instant::now(),
             cursor_locked: false,
+            egui_ctx,
+            egui_state,
         }
     }
 
@@ -51,7 +66,22 @@ impl GlobalState {
         self.chunk_manager
             .flush_queues(&self.gpu_state, &self.renderer.terrain_pipeline);
 
-        self.renderer.render(&self.gpu_state, &self.chunk_manager);
+        let raw_input = self.egui_state.take_egui_input(&self.window);
+
+        let full_output = self.egui_ctx.run_ui(raw_input, |ctx| {
+            egui::Window::new("Perf").show(ctx, |ui| {
+                ui.label(format!("FPS: {:.1}", 1.0 / dt));
+            });
+        });
+
+        self.renderer.render(
+            &self.gpu_state,
+            &self.chunk_manager,
+            &self.egui_ctx,
+            &mut self.egui_state,
+            &self.window,
+            full_output,
+        );
     }
 
     fn resize(&mut self, width: u32, height: u32) {
@@ -90,8 +120,7 @@ impl GlobalState {
             let _ = self
                 .window
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined);
-            let _ = self.window.set_cursor_visible(
-                false);
+            let _ = self.window.set_cursor_visible(false);
             self.cursor_locked = true;
         }
     }

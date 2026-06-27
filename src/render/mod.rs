@@ -1,7 +1,11 @@
 use std::borrow::Cow;
 
+use egui::FullOutput;
 use glam::Mat4;
-use wgpu::{Device, ShaderModule, ShaderModuleDescriptor, ShaderSource, Texture, TextureView};
+use wgpu::{
+    CurrentSurfaceTexture::Success, Device, ShaderModule, ShaderModuleDescriptor, ShaderSource,
+    Texture, TextureView,
+};
 
 use crate::{
     chunk::ChunkManager,
@@ -23,6 +27,8 @@ pub struct Renderer {
     shader: ShaderModule,
 
     pub terrain_pipeline: TerrainPipeline,
+
+    egui_renderer: egui_wgpu::Renderer,
 }
 
 impl Renderer {
@@ -36,6 +42,14 @@ impl Renderer {
         let terrain_pipeline =
             TerrainPipeline::new(&gpu_state.device, &shader, gpu_state.config.format);
 
+        let egui_renderer = egui_wgpu::Renderer::new(
+            &gpu_state.device,
+            gpu_state.config.format,
+            egui_wgpu::RendererOptions {
+                ..Default::default()
+            },
+        );
+
         Self {
             aspect_ratio: 1.0,
             depth_texture_view: None,
@@ -43,6 +57,7 @@ impl Renderer {
             camera: Camera::new(),
             shader,
             terrain_pipeline,
+            egui_renderer,
         }
     }
 
@@ -79,42 +94,115 @@ impl Renderer {
         })
     }
 
-    pub fn render(&self, gpu_state: &GpuState, chunk_manager: &ChunkManager) {
+    pub fn render(
+        &mut self,
+        gpu_state: &GpuState,
+        chunk_manager: &ChunkManager,
+        egui_ctx: &egui::Context,
+        egui_state: &mut egui_winit::State,
+        window: &winit::window::Window,
+        full_output: FullOutput,
+    ) {
+        egui_state.handle_platform_output(window, full_output.platform_output);
+
         match gpu_state.surface.get_current_texture() {
-            Ok(output) => {
+            Success(output) => {
                 let surface_view = output
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
 
-                // Clone the depth_texture_view to avoid a simultaneous mutable and immutable borrow
-                // of renderer. The TextureView is cheap to clone as it contains Arcs.
-                let depth_texture_view_owned = self
+                let depth_view = self
                     .depth_texture_view
                     .as_ref()
-                    .expect("Depth texture view not initialized")
+                    .expect("depth not init")
                     .clone();
 
-                let command_buffer = self.render_inner(
-                    gpu_state,
-                    &surface_view,
-                    &depth_texture_view_owned,
-                    chunk_manager,
+                // テクスチャの更新（フォントアトラスなど）
+                for (id, delta) in &full_output.textures_delta.set {
+                    self.egui_renderer.update_texture(
+                        &gpu_state.device,
+                        &gpu_state.queue,
+                        *id,
+                        delta,
+                    );
+                }
+
+                // クリップされたシェイプをメッシュに変換
+                let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                    size_in_pixels: [gpu_state.config.width, gpu_state.config.height],
+                    pixels_per_point: 1.0,
+                };
+                let clipped_primitives =
+                    egui_ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+
+                let mut encoder =
+                    gpu_state
+                        .device
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("Main Encoder"),
+                        });
+
+                // egui の頂点・インデックスバッファを事前に準備
+                self.egui_renderer.update_buffers(
+                    &gpu_state.device,
+                    &gpu_state.queue,
+                    &mut encoder,
+                    &clipped_primitives,
+                    &screen_descriptor,
                 );
 
-                gpu_state.queue.submit(std::iter::once(command_buffer));
+                // 地形描画
+                self.render_terrain(
+                    &gpu_state,
+                    &surface_view,
+                    &depth_view,
+                    chunk_manager,
+                    &mut encoder,
+                );
+
+                // egui描画パス（地形の後）
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("egui Pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &surface_view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load, // Clearではなく既存の上に重ねる
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None, // eguiはデプス不要
+                        ..Default::default()
+                    });
+
+                    let mut pass = pass.forget_lifetime();
+
+                    self.egui_renderer
+                        .render(&mut pass, &clipped_primitives, &screen_descriptor);
+                }
+
+                // 不要になったテクスチャを解放
+                for id in &full_output.textures_delta.free {
+                    self.egui_renderer.free_texture(id);
+                }
+
+                gpu_state.queue.submit(std::iter::once(encoder.finish()));
                 output.present();
             }
-            Err(e) => log::error!("Surface error: {:?}", e),
+            _ => log::error!("Surface error"),
         }
     }
 
-    fn render_inner(
+    fn render_terrain(
         &self,
         gpu_state: &GpuState,
         surface_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
         chunk_manager: &ChunkManager,
-    ) -> wgpu::CommandBuffer {
+        encoder: &mut wgpu::CommandEncoder,
+    ) {
         let p = Mat4::perspective_infinite_lh(self.camera.fov.to_radians(), self.aspect_ratio, 0.1);
         let vp = p * self.camera.get_v_matrix();
 
@@ -135,18 +223,12 @@ impl Renderer {
             );
         }
 
-        let mut encoder =
-            gpu_state
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Main Encoder"),
-                });
-
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Main Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: surface_view,
                 resolve_target: None,
+                depth_slice: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
                         r: 0.1,
@@ -179,8 +261,6 @@ impl Renderer {
             pass.draw_indexed(0..self.terrain_pipeline.index_count, 0, 0..1);
         }
         drop(pass);
-
-        encoder.finish()
     }
 
     pub fn physics_update(&mut self, key_bind: &KeyBindings, dt: f64) {
