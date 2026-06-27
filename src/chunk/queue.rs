@@ -1,8 +1,11 @@
-use crate::chunk::ChunkManager;
+use crate::{
+    chunk::{ChunkManager, entry::ChunkEntry},
+    render::{GpuState, terrain::TerrainPipeline},
+};
 
 impl ChunkManager {
     /// メインループで毎フレーム呼ぶ
-    pub fn flush_queues(&mut self) {
+    pub fn flush_queues(&mut self, gpu_state: &GpuState, terrain: &TerrainPipeline) {
         // 1. 削除
         let drain_count = self.removal_queue.len().min(Self::MAX_REMOVALS_PER_FRAME);
         for key in self.removal_queue.drain(..drain_count).collect::<Vec<_>>() {
@@ -25,7 +28,17 @@ impl ChunkManager {
                 // キャンセルされてたらスキップ
                 continue;
             }
-            self.create_render_chunk(mesh_data);
+
+            let entry = ChunkEntry::new(
+                mesh_data.position,
+                mesh_data.lod_level,
+                mesh_data.height_map,
+                gpu_state,
+                &terrain.bind_group_layout,
+                &terrain.vp_buffer,
+            );
+
+            self.create_render_chunk(entry);
             // GPUアップロードはここ
         }
     }

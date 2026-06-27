@@ -5,17 +5,20 @@ use std::{
     thread,
 };
 
-use glam::DVec3;
+use glam::{DVec3, I64Vec3};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::chunk::{entry::ChunkEntry, generate::generate_height_map};
+use crate::chunk::{
+    entry::ChunkEntry,
+    generate::{ChunkMeshData, generate_height_map},
+};
 
 mod entry;
 mod generate;
 mod queue;
 
 pub struct ChunkManager {
-    entries: FxHashMap<SnappedChunkPos, ChunkEntry>,
+    pub(crate) entries: FxHashMap<SnappedChunkPos, ChunkEntry>,
     last_updated_pos: Option<ChunkPos>,
     pub radius: i64,
     removal_queue: Vec<SnappedChunkPos>,
@@ -23,7 +26,7 @@ pub struct ChunkManager {
 
     // 非同期生成用
     mesh_sender: mpsc::Sender<(SnappedChunkPos, usize)>, // スレッドへ
-    mesh_receiver: mpsc::Receiver<ChunkEntry>,           // スレッドから
+    mesh_receiver: mpsc::Receiver<ChunkMeshData>,        // スレッドから
     in_flight: FxHashSet<SnappedChunkPos>,               // 生成中のpos
 }
 
@@ -33,7 +36,7 @@ impl ChunkManager {
 
     pub fn new() -> Self {
         let (req_tx, req_rx) = mpsc::channel::<(SnappedChunkPos, usize)>();
-        let (res_tx, res_rx) = mpsc::channel::<ChunkEntry>();
+        let (res_tx, res_rx) = mpsc::channel::<ChunkMeshData>();
 
         // ワーカースレッド
         thread::spawn(move || {
@@ -105,7 +108,7 @@ impl ChunkManager {
                 if delta.x == 0 && delta.z == 0 {
                     return;
                 }
-                
+
                 info!("Chunk position updated: {:?} -> {:?}", last, new_pos);
                 self.last_updated_pos = Some(new_pos);
 
@@ -225,19 +228,27 @@ pub struct ChunkPos {
 impl ChunkPos {
     pub const ZERO: ChunkPos = ChunkPos { x: 0, z: 0 };
 
-    fn new(x: i64, z: i64) -> Self {
+    pub fn new(x: i64, z: i64) -> Self {
         Self { x, z }
     }
 
-    fn bit_and(&self, v: i64) -> Self {
+    pub fn bit_and(&self, v: i64) -> Self {
         Self {
             x: self.x & v,
             z: self.z & v,
         }
     }
 
-    fn len_sq(&self) -> i64 {
+    pub fn len_sq(&self) -> i64 {
         self.x * self.x + self.z * self.z
+    }
+
+    pub fn as_i64vec3(&self) -> I64Vec3 {
+        I64Vec3 {
+            x: self.x,
+            y: 0,
+            z: self.z,
+        }
     }
 }
 
@@ -264,4 +275,4 @@ impl Sub for ChunkPos {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct SnappedChunkPos(ChunkPos);
+pub struct SnappedChunkPos(pub(crate) ChunkPos);

@@ -7,14 +7,14 @@ pub struct Camera {
     pub velocity: DVec3,
     pub rotation: Vec3,
     pub fov: f32,
-}   
+}
 
 impl Camera {
     pub fn new() -> Self {
         Self {
-            position: DVec3::ZERO,
+            position: DVec3::new(0.0, 50.0, 0.0),
             velocity: DVec3::ZERO,
-            rotation: Vec3::ZERO,
+            rotation: Vec3::new(90.0, 0.0, 0.0),
             fov: 72.0,
         }
     }

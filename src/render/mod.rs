@@ -1,17 +1,22 @@
 use std::borrow::Cow;
 
 use glam::Mat4;
+use log::info;
 use wgpu::{
     Device, RenderPass, ShaderModule, ShaderModuleDescriptor, ShaderSource, Texture, TextureView,
 };
 
 use crate::{
+    chunk::ChunkManager,
     key::KeyBindings,
-    render::{buffer::GenericRenderBuffer, camera::Camera, vertex::VertexLayout},
+    render::{
+        buffer::GenericRenderBuffer, camera::Camera, terrain::TerrainPipeline, vertex::VertexLayout,
+    },
 };
 
 pub mod buffer;
 pub mod camera;
+pub mod terrain;
 pub mod vertex;
 pub mod window;
 
@@ -21,6 +26,8 @@ pub struct Renderer {
     depth_texture: Option<Texture>,
     pub(crate) camera: Camera,
     shader: ShaderModule,
+
+    pub terrain_pipeline: TerrainPipeline,
 }
 
 impl Renderer {
@@ -31,12 +38,16 @@ impl Renderer {
             Some("Terrain Shader"),
         );
 
+        let terrain_pipeline =
+            TerrainPipeline::new(&gpu_state.device, &shader, gpu_state.config.format);
+
         Self {
             aspect_ratio: 1.0,
             depth_texture_view: None,
             depth_texture: None,
             camera: Camera::new(),
             shader,
+            terrain_pipeline,
         }
     }
 
@@ -73,7 +84,7 @@ impl Renderer {
         })
     }
 
-    pub fn render(&self, gpu_state: &GpuState) {
+    pub fn render(&self, gpu_state: &GpuState, chunk_manager: &ChunkManager) {
         match gpu_state.surface.get_current_texture() {
             Ok(output) => {
                 let surface_view = output
@@ -88,8 +99,12 @@ impl Renderer {
                     .expect("Depth texture view not initialized")
                     .clone();
 
-                let command_buffer =
-                    self.render_inner(gpu_state, &surface_view, &depth_texture_view_owned);
+                let command_buffer = self.render_inner(
+                    gpu_state,
+                    &surface_view,
+                    &depth_texture_view_owned,
+                    chunk_manager,
+                );
 
                 gpu_state.queue.submit(std::iter::once(command_buffer));
                 output.present();
@@ -103,22 +118,38 @@ impl Renderer {
         gpu_state: &GpuState,
         surface_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
+        chunk_manager: &ChunkManager,
     ) -> wgpu::CommandBuffer {
+        let p = Mat4::perspective_infinite_lh(self.camera.fov.to_radians(), self.aspect_ratio, 0.1);
+        let vp = p * self.camera.get_v_matrix();
+
+        self.terrain_pipeline.update_vp(&gpu_state.queue, &vp);
+
+        for entry in chunk_manager.entries.values() {
+            let chunk_w_pos = entry.position.0.as_i64vec3() * ChunkManager::SIZE as i64;
+            let rel = chunk_w_pos.as_dvec3() - self.camera.position;
+            gpu_state.queue.write_buffer(
+                &entry.rel_pos_buffer,
+                0,
+                bytemuck::cast_slice(&rel.as_vec3().to_array()),
+            );
+        }
+
         let mut encoder =
             gpu_state
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Main Render Encoder"),
+                    label: Some("Main Encoder"),
                 });
 
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("Main Render Pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: surface_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.1, 
+                        r: 0.1,
                         g: 0.2,
                         b: 0.3,
                         a: 1.0,
@@ -137,28 +168,19 @@ impl Renderer {
             ..Default::default()
         });
 
-        let p_matrix =
-            Mat4::perspective_infinite_lh(self.camera.fov.to_radians(), self.aspect_ratio, 0.1);
-        let v_matrix = self.camera.get_v_matrix();
+        pass.set_pipeline(&self.terrain_pipeline.pipeline);
+        pass.set_index_buffer(
+            self.terrain_pipeline.index_buffer.slice(..),
+            wgpu::IndexFormat::Uint32,
+        );
 
-        let vp_matrix = p_matrix * v_matrix;
-
-        drop(render_pass);
+        for entry in chunk_manager.entries.values() {
+            pass.set_bind_group(0, &entry.bind_group, &[]);
+            pass.draw_indexed(0..self.terrain_pipeline.index_count, 0, 0..1);
+        }
+        drop(pass);
 
         encoder.finish()
-    }
-
-    fn issue_draw<'pass, V: VertexLayout, const I: usize>(
-        render_pass: &mut RenderPass<'pass>,
-        buffer: &'pass GenericRenderBuffer<V>,
-        bind_groups: [wgpu::BindGroup; I],
-    ) {
-        for (i, bg) in bind_groups.iter().enumerate() {
-            render_pass.set_bind_group(i as u32, bg, &[]);
-        }
-
-        buffer.bind_to_render_pass(render_pass);
-        render_pass.draw_indexed(0..buffer.index_count(), 0, 0..1);
     }
 
     pub fn physics_update(&mut self, key_bind: &KeyBindings, dt: f64) {

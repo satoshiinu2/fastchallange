@@ -137,7 +137,7 @@ async fn create_gpu_state(window: Arc<Window>) -> GpuState {
         .request_device(&wgpu::DeviceDescriptor {
             label: None,
             required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            required_limits: wgpu::Limits::downlevel_defaults(),
             memory_hints: Default::default(),
             trace: wgpu::Trace::Off,
         })

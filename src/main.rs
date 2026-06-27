@@ -46,9 +46,10 @@ impl GlobalState {
         self.chunk_manager
             .update_position(self.renderer.camera.position);
 
-        self.chunk_manager.flush_queues();
+        self.chunk_manager
+            .flush_queues(&self.gpu_state, &self.renderer.terrain_pipeline);
 
-        self.renderer.render(&self.gpu_state);
+        self.renderer.render(&self.gpu_state, &self.chunk_manager);
     }
 
     fn resize(&mut self, width: u32, height: u32) {
