@@ -166,8 +166,8 @@ async fn create_gpu_state(window: Arc<Window>) -> GpuState {
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: wgpu::Features::empty(),
-            required_limits: wgpu::Limits::downlevel_defaults(),
+            required_features: wgpu::Features::MULTI_DRAW_INDIRECT_COUNT,
+            required_limits: wgpu::Limits::default(),
             memory_hints: Default::default(),
             trace: wgpu::Trace::Off,
             experimental_features: Default::default(),

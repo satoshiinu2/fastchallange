@@ -16,7 +16,7 @@ env_logger = "0.11.10"
 pollster = "0.4.0"
 log = "0.4.33"
 bytemuck = "1.25.0"
-glam = "0.33.1"
+glam = { version = "0.33.1", features = ["bytemuck"] }
 rustc-hash = "2.1.2"
 fastnoise2 = "0.4.0"
 rayon = "1.12.0"

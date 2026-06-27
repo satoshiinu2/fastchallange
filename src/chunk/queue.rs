@@ -21,9 +21,6 @@ impl ChunkManager {
                 mesh_data.position,
                 mesh_data.lod_level,
                 mesh_data.height_map,
-                gpu_state,
-                &terrain.bind_group_layout,
-                &terrain.vp_buffer,
             );
             self.entries.insert(entry.position, entry);
         }

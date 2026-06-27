@@ -1,3 +1,5 @@
+
+use glam::Vec4;
 use wgpu::util::DeviceExt;
 
 use crate::chunk::ChunkManager;
@@ -8,18 +10,24 @@ pub struct TerrainPipeline {
     pub vp_buffer: wgpu::Buffer,    // 共有 VP matrix uniform
     pub index_buffer: wgpu::Buffer, // 全チャンク共有、16x16 グリッドの indices
     pub index_count: u32,
+
+    pub global_chunks_buffer: wgpu::Buffer,
+    pub global_bind_group: wgpu::BindGroup,
 }
 
 impl TerrainPipeline {
-    pub fn new(
+    pub const MAX_CHUNKS_PER_DRAW: usize = 48;
+
+pub fn new(
         device: &wgpu::Device,
         shader: &wgpu::ShaderModule,
         surface_format: wgpu::TextureFormat,
     ) -> Self {
+        // 1. 最初から、新しい一括描画用（Bindingが2つ）のレイアウトを作成する
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("Terrain BGL"),
             entries: &[
-                // @binding(0) height_map: storage
+                // @binding(0) var<uniform> all_chunks: array<ChunkData, 48>;
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::VERTEX,
@@ -30,31 +38,9 @@ impl TerrainPipeline {
                     },
                     count: None,
                 },
-                // @binding(1) rel_pos: uniform
+                // @binding(1) var<uniform> vp_matrix: mat4x4<f32>;
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // @binding(2) lod_level: uniform
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // @binding(3) vp_matrix: uniform
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
                     visibility: wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -66,6 +52,7 @@ impl TerrainPipeline {
             ],
         });
 
+        // 2. この正しいレイアウトを使ってパイプラインレイアウトを作成
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Terrain Pipeline Layout"),
             bind_group_layouts: &[Some(&bind_group_layout)],
@@ -109,7 +96,7 @@ impl TerrainPipeline {
             cache: None,
         });
 
-        // 16x16 グリッド → 15x15 クワッド → 2三角形ずつ
+        // インデックスバッファなどの生成処理
         let indices = Self::build_grid_indices(ChunkManager::MESH_SIZE as u32);
         let index_count = indices.len() as u32;
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -125,15 +112,42 @@ impl TerrainPipeline {
             mapped_at_creation: false,
         });
 
+        // 🗑️ 【削除】ここにあった「let bind_group_layout = ...（2回目の再定義）」は丸ごと消します！
+
+        let global_chunks_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Global Chunks Uniform Buffer"),
+            size: (std::mem::size_of::<GpuChunkData>() * Self::MAX_CHUNKS_PER_DRAW) as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        // 最初で作った bind_group_layout をそのまま使ってバンドグループを生成
+        let global_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Global Terrain BindGroup"),
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: global_chunks_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: vp_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
         Self {
             pipeline,
             bind_group_layout,
             vp_buffer,
             index_buffer,
             index_count,
+            global_chunks_buffer,
+            global_bind_group,
         }
     }
-
+    
     pub fn build_grid_indices(n: u32) -> Vec<u32> {
         let mut indices = Vec::with_capacity(((n - 1) * (n - 1) * 6) as usize);
         for z in 0..n - 1 {
@@ -156,4 +170,18 @@ impl TerrainPipeline {
             bytemuck::cast_slice(&vp.to_cols_array()),
         );
     }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuHeightMap {
+    pub data: [[f32; 4]; 73],
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuChunkData {
+    pub rel_pos: Vec4,            // 16バイト アライメントのためVec4
+    pub lod_level: u32,           // 4バイト
+    pub _padding: [u32; 3],       // 12バイトのパディング
+    pub height_map: GpuHeightMap, // 73 * 16 = 1168バイト
 }
