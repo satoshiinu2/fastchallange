@@ -15,7 +15,7 @@ pub struct ChunkManager {
     pub(crate) entries: FxHashMap<SnappedChunkPos, ChunkEntry>,
     last_updated_pos: Option<ChunkPos>,
     pub radius: i64,
-    recreate_queue: Vec<(SnappedChunkPos, usize)>, // (pos, lod_level)
+    recreate_queue: FxHashMap<SnappedChunkPos, usize>, // (pos, lod_level)
 }
 
 impl ChunkManager {
@@ -28,7 +28,7 @@ impl ChunkManager {
             entries: FxHashMap::default(),
             last_updated_pos: None,
             radius: 100,
-            recreate_queue: Vec::new(),
+            recreate_queue: FxHashMap::default(),
         }
     }
 
@@ -104,9 +104,11 @@ impl ChunkManager {
                 let key = SnappedChunkPos(snapped);
                 if needed.insert(key) {
                     match self.entries.get(&key) {
-                        None => self.recreate_queue.push((key, lod_level)),
+                        None => {
+                            self.recreate_queue.insert(key, lod_level);
+                        }
                         Some(e) if e.lod_level != lod_level => {
-                            self.recreate_queue.push((key, lod_level));
+                            self.recreate_queue.insert(key, lod_level);
                         }
                         _ => {}
                     }
@@ -128,7 +130,7 @@ impl ChunkManager {
             o - i
         };
 
-        let r =self.radius;
+        let r = self.radius;
         let lod0 = area(0, 7.min(r)) / 1; // step=1
         let lod1 = area(8, 15.min(r).max(7)) / 4; // step=2
         let lod2 = area(16, 31.min(r).max(15)) / 16; // step=4
