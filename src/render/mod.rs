@@ -16,10 +16,8 @@ use crate::{
     },
 };
 
-pub mod buffer;
 pub mod camera;
 pub mod terrain;
-pub mod vertex;
 pub mod window;
 
 pub struct Renderer {
@@ -27,7 +25,6 @@ pub struct Renderer {
     pub(crate) depth_texture_view: Option<TextureView>,
     depth_texture: Option<Texture>,
     pub(crate) camera: Camera,
-    shader: ShaderModule,
 
     pub terrain_pipeline: TerrainPipeline,
 
@@ -58,7 +55,6 @@ impl Renderer {
             depth_texture_view: None,
             depth_texture: None,
             camera: Camera::new(),
-            shader,
             terrain_pipeline,
             egui_renderer,
         }

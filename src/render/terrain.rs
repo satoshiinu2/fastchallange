@@ -5,7 +5,6 @@ use crate::chunk::ChunkManager;
 
 pub struct TerrainPipeline {
     pub pipeline: wgpu::RenderPipeline,
-    pub bind_group_layout: wgpu::BindGroupLayout,
     pub vp_buffer: wgpu::Buffer,    // 共有 VP matrix uniform
     pub index_buffer: wgpu::Buffer, // 全チャンク共有、16x16 グリッドの indices
     pub index_count: u32,
@@ -136,7 +135,6 @@ impl TerrainPipeline {
 
         Self {
             pipeline,
-            bind_group_layout,
             vp_buffer,
             index_buffer,
             index_count,
