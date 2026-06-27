@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, warn};
 use std::{
     ops::{Add, Sub},
     sync::mpsc,
@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::chunk::{
     entry::ChunkEntry,
-    generate::{ChunkMeshData, generate_height_map},
+    generate::{ChunkGenerator, ChunkMeshData},
 };
 
 mod entry;
@@ -32,6 +32,7 @@ pub struct ChunkManager {
 
 impl ChunkManager {
     pub const SIZE: usize = 16;
+    pub const MESH_SIZE: usize = Self::SIZE + 1;
     const MAX_REMOVALS_PER_FRAME: usize = 100;
 
     pub fn new() -> Self {
@@ -40,9 +41,11 @@ impl ChunkManager {
 
         // ワーカースレッド
         thread::spawn(move || {
+            let generator = ChunkGenerator::new();
             while let Ok((pos, lod)) = req_rx.recv() {
-                let height_map = generate_height_map(pos, lod); // 重い処理
-                if res_tx.send(height_map).is_err() {
+                let height_map = generator.generate_chunk(pos, lod); // 重い処理
+                if let Err(e) = res_tx.send(height_map) {
+                    warn!("worker thread error: {}", e);
                     break;
                 }
             }
@@ -65,13 +68,27 @@ impl ChunkManager {
 
         let idk_pos = self.last_updated_pos.unwrap_or(ChunkPos::ZERO);
 
-        let dist2: ChunkPos = (pos.bit_and(!1)) - (idk_pos.bit_and(!1)); // 0001
+        const BIT_MASK2: i64 = !0b0001;
+        let dist2: ChunkPos = (pos.bit_and(BIT_MASK2)) - (idk_pos.bit_and(BIT_MASK2));
         if dist2.len_sq() >= 8 * 8 {
             lod_level += 1;
         }
 
-        let dist4: ChunkPos = (pos.bit_and(!3)) - (idk_pos.bit_and(!3)); // 0011
+        const BIT_MASK4: i64 = !0b0011;
+        let dist4: ChunkPos = (pos.bit_and(BIT_MASK4)) - (idk_pos.bit_and(BIT_MASK4));
         if dist4.len_sq() >= 16 * 16 {
+            lod_level += 1;
+        }
+
+        const BIT_MASK8: i64 = !0b0111;
+        let dist8: ChunkPos = (pos.bit_and(BIT_MASK8)) - (idk_pos.bit_and(BIT_MASK8));
+        if dist8.len_sq() >= 32 * 32 {
+            lod_level += 1;
+        }
+
+        const BIT_MASK16: i64 = !0b1111;
+        let dist16: ChunkPos = (pos.bit_and(BIT_MASK16)) - (idk_pos.bit_and(BIT_MASK16));
+        if dist16.len_sq() >= 64 * 64 {
             lod_level += 1;
         }
 
@@ -134,14 +151,17 @@ impl ChunkManager {
             }
         }
 
-        // neededに含まれないものを削除キューへ
+        // neededに含まれないものを削除
         let to_remove: Vec<_> = self
             .entries
             .keys()
             .filter(|k| !needed.contains(k))
             .cloned()
             .collect();
-        self.removal_queue.extend(to_remove);
+        for key in to_remove {
+            self.remove_render_chunk(key);
+            self.in_flight.remove(&key);
+        }
     }
 }
 

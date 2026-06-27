@@ -90,7 +90,8 @@ impl GlobalState {
             let _ = self
                 .window
                 .set_cursor_grab(winit::window::CursorGrabMode::Confined);
-            let _ = self.window.set_cursor_visible(false);
+            let _ = self.window.set_cursor_visible(
+                false);
             self.cursor_locked = true;
         }
     }

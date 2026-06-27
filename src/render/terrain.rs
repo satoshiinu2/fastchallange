@@ -1,5 +1,7 @@
 use wgpu::util::DeviceExt;
 
+use crate::chunk::ChunkManager;
+
 
 pub struct TerrainPipeline {
     pub pipeline: wgpu::RenderPipeline,
@@ -109,7 +111,7 @@ impl TerrainPipeline {
         });
 
         // 16x16 グリッド → 15x15 クワッド → 2三角形ずつ
-        let indices = Self::build_grid_indices(16);
+        let indices = Self::build_grid_indices(ChunkManager::MESH_SIZE as u32);
         let index_count = indices.len() as u32;
         let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Terrain Index Buffer"),

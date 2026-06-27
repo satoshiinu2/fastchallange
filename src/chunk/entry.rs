@@ -5,7 +5,7 @@ use crate::{
     render::GpuState,
 };
 
-pub const HEIGHT_MAP_SIZE: usize = ChunkManager::SIZE * ChunkManager::SIZE;
+pub const HEIGHT_MAP_SIZE: usize = ChunkManager::MESH_SIZE * ChunkManager::MESH_SIZE;
 
 pub struct ChunkEntry {
     pub position: SnappedChunkPos,
@@ -27,15 +27,19 @@ impl ChunkEntry {
         bind_group_layout: &wgpu::BindGroupLayout,
         vp_buffer: &wgpu::Buffer,
     ) -> Self {
+        const HEIGHT_MAP_VEC4_COUNT: usize = HEIGHT_MAP_SIZE.div_ceil(4);
+
         let device = &gpu_state.device;
+
+        let mut padded = [0.0f32; HEIGHT_MAP_VEC4_COUNT * 4];
+        padded[..HEIGHT_MAP_SIZE].copy_from_slice(&height_map);
 
         let height_map_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("HeightMap Uniform"),
-            contents: bytemuck::cast_slice(&height_map),
+            contents: bytemuck::cast_slice(&padded),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let pos = position.0;
         let rel_pos_data = [0, 0, 0, 0];
         let rel_pos_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Relative Pos Uniform"),

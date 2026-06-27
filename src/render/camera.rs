@@ -60,7 +60,7 @@ impl Camera {
         acceleration.y = input_vec.y;
         acceleration.z = f32::cos(radians_z) * input_vec.z + f32::cos(radians_x) * input_vec.x;
 
-        let acceleration_rate = 25.0;
+        let acceleration_rate =100.0;
 
         let acceleration = acceleration.as_dvec3() * acceleration_rate;
 
