@@ -35,9 +35,9 @@ impl GlobalState {
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
             &window,
-            None, // native_pixels_per_point
-            None, // max_texture_side
-            None, // theme
+            None, 
+            None, 
+            None, 
         );
 
         Self {

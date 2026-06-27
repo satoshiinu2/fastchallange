@@ -1,5 +1,3 @@
-use glutin::config::{ConfigTemplateBuilder, GlConfig};
-use glutin_winit::DisplayBuilder;
 use log::info;
 use winit::application::ApplicationHandler;
 use winit::event_loop::ActiveEventLoop;
@@ -26,25 +24,7 @@ impl ApplicationHandler for App {
         }
 
         let window_attributes = WindowAttributes::default().with_title("coresealed-rs");
-        let template = ConfigTemplateBuilder::new();
-        let display_builder = DisplayBuilder::new().with_window_attributes(Some(window_attributes));
-
-        // Glutin の初期化
-        let (window, _gl_config) = display_builder
-            .build(event_loop, template, |configs| {
-                configs
-                    .reduce(|accum, config| {
-                        if config.num_samples() > accum.num_samples() {
-                            config
-                        } else {
-                            accum
-                        }
-                    })
-                    .unwrap()
-            })
-            .unwrap();
-
-        let window = Arc::new(window.unwrap());
+        let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let gpu_state = pollster::block_on(create_gpu_state(window.clone()));
 
@@ -63,6 +43,7 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
+    self.global_state = None;
                 event_loop.exit();
             }
 

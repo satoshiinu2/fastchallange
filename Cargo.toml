@@ -8,8 +8,6 @@ log_chunk_update = []
 
 [dependencies]
 wgpu = "29"
-glutin = "0.32"
-glutin-winit = "0.5.0"
 winit = "0.30"
 raw-window-handle = "0.6.2"
 env_logger = "0.11.10"
