@@ -13,10 +13,7 @@ use winit::{
     window::{Window, WindowAttributes, WindowId},
 };
 
-use crate::{
-    GlobalState,
-    render::GpuState,
-};
+use crate::{GlobalState, render::GpuState};
 
 struct App {
     global_state: Option<GlobalState>,
@@ -84,8 +81,25 @@ impl ApplicationHandler for App {
                     ElementState::Released => global_state.key_up(key),
                 }
             }
-
+            WindowEvent::MouseInput { state, button, .. } => {
+                global_state.handle_mouse_input(state, button);
+            }
             _ => {}
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        let Some(global_state) = self.global_state.as_mut() else {
+            return;
+        };
+
+        if let DeviceEvent::MouseMotion { delta } = event {
+            global_state.handle_mouse_motion(delta.0, delta.1);
         }
     }
 
