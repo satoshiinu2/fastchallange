@@ -5,11 +5,13 @@ use winit::window::Window;
 use crate::{
     chunk::ChunkManager,
     key::KeyBindings,
+    perf::PerformanceManagers,
     render::{GpuState, Renderer, window::run_client},
 };
 
 mod chunk;
 mod key;
+mod perf;
 mod render;
 
 pub struct GlobalState {
@@ -17,6 +19,7 @@ pub struct GlobalState {
     gpu_state: GpuState,
     renderer: Renderer,
     chunk_manager: ChunkManager,
+    perf_man: PerformanceManagers,
     key_bindings: KeyBindings,
     last_frame_time: Instant,
     cursor_locked: bool,
@@ -28,6 +31,7 @@ impl GlobalState {
     fn new(window: Arc<Window>, gpu_state: GpuState) -> Self {
         let renderer = Renderer::new(&gpu_state);
         let chunk_manager = ChunkManager::new();
+        let perf_man = PerformanceManagers::new();
         let key_bindings = KeyBindings::new();
 
         let egui_ctx = egui::Context::default();
@@ -35,9 +39,9 @@ impl GlobalState {
             egui_ctx.clone(),
             egui::ViewportId::ROOT,
             &window,
-            None, 
-            None, 
-            None, 
+            None,
+            None,
+            None,
         );
 
         Self {
@@ -45,6 +49,7 @@ impl GlobalState {
             gpu_state,
             renderer,
             chunk_manager,
+            perf_man,
             key_bindings,
             last_frame_time: Instant::now(),
             cursor_locked: false,
@@ -63,18 +68,35 @@ impl GlobalState {
         self.chunk_manager
             .update_position(self.renderer.camera.position);
 
-        self.chunk_manager
-            .flush_queues();
+        self.chunk_manager.flush_queues(&mut self.perf_man);
 
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
         let full_output = self.egui_ctx.run_ui(raw_input, |ctx| {
-            egui::Window::new("Perf").show(ctx, |ui| {
+            egui::Window::new("Info").show(ctx, |ui| {
                 ui.label(format!("FPS: {:.1}", 1.0 / dt));
+                ui.add_space(8.0);
+
+                ui.label(format!("Position: {:.1}", self.renderer.camera.position));
+                ui.label(format!("Velocity: {:.1}", self.renderer.camera.velocity));
+                ui.add_space(8.0);
+
+                ui.label(format!(
+                    "Chunk count: {:}",
+                    self.chunk_manager.entries.len()
+                ));
+                ui.add_space(8.0);
+
+                ui.label(format!("Render: {:}us", self.perf_man.render.formatted()));
+                ui.label(format!(
+                    "Generation: {:}us",
+                    self.perf_man.generation.formatted()
+                ));
             });
         });
 
         self.renderer.render(
+            &mut self.perf_man,
             &self.gpu_state,
             &self.chunk_manager,
             &self.egui_ctx,

@@ -10,6 +10,7 @@ use wgpu::{
 use crate::{
     chunk::ChunkManager,
     key::KeyBindings,
+    perf::PerformanceManagers,
     render::{
         camera::Camera,
         terrain::{GpuChunkData, GpuHeightMap, GpuShaowMap, TerrainPipeline},
@@ -95,6 +96,7 @@ impl Renderer {
 
     pub fn render(
         &mut self,
+        perf_man: &mut PerformanceManagers,
         gpu_state: &GpuState,
         chunk_manager: &ChunkManager,
         egui_ctx: &egui::Context,
@@ -102,6 +104,8 @@ impl Renderer {
         window: &winit::window::Window,
         full_output: FullOutput,
     ) {
+        let mut render_perf_man = perf_man.render.start();
+
         egui_state.handle_platform_output(window, full_output.platform_output);
 
         match gpu_state.surface.get_current_texture() {
@@ -192,6 +196,8 @@ impl Renderer {
             }
             _ => log::error!("Surface error"),
         }
+
+        render_perf_man.end();
     }
 
     fn render_terrain(

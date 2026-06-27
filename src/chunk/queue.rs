@@ -1,10 +1,13 @@
-use crate::
-    chunk::{ChunkManager, entry::ChunkEntry}
-;
+use crate::{
+    chunk::{ChunkManager, entry::ChunkEntry},
+    perf::PerformanceManagers,
+};
 use rayon::prelude::*;
 
 impl ChunkManager {
-    pub fn flush_queues(&mut self) {
+    pub fn flush_queues(&mut self, perf_man: &mut PerformanceManagers) {
+        let mut gen_perf_man= perf_man.generation.start();
+        
         let generator = &self.generator;
 
         let results: Vec<_> = self
@@ -24,5 +27,7 @@ impl ChunkManager {
             );
             self.entries.insert(entry.position, entry);
         }
+
+        gen_perf_man.end();
     }
 }
