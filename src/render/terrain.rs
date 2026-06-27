@@ -111,8 +111,6 @@ impl TerrainPipeline {
             mapped_at_creation: false,
         });
 
-        // 🗑️ 【削除】ここにあった「let bind_group_layout = ...（2回目の再定義）」は丸ごと消します！
-
         let global_chunks_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Global Chunks Uniform Buffer"),
             size: (std::mem::size_of::<GpuChunkData>() * Self::MAX_CHUNKS_PER_DRAW) as u64,
@@ -178,9 +176,15 @@ pub struct GpuHeightMap {
 }
 #[repr(C)]
 #[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuShaowMap {
+    pub data: [[f32; 4]; 73],
+}
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuChunkData {
     pub rel_pos: Vec4,            // 16バイト アライメントのためVec4
     pub lod_level: u32,           // 4バイト
     pub _padding: [u32; 3],       // 12バイトのパディング
     pub height_map: GpuHeightMap, // 73 * 16 = 1168バイト
+    pub shadow_map: GpuShaowMap,  // 73 * 16 = 1168バイト
 }

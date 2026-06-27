@@ -12,7 +12,7 @@ use crate::{
     key::KeyBindings,
     render::{
         camera::Camera,
-        terrain::{GpuChunkData, GpuHeightMap, TerrainPipeline},
+        terrain::{GpuChunkData, GpuHeightMap, GpuShaowMap, TerrainPipeline},
     },
 };
 
@@ -165,7 +165,7 @@ impl Renderer {
 
                 // egui描画パス（地形の後）
                 {
-                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("egui Pass"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &surface_view,
@@ -227,12 +227,20 @@ impl Renderer {
             let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_heights);
             flat_dst[..289].copy_from_slice(flat_src);
 
+            let mut padded_shadows = [[0.0f32; 4]; 73];
+            let flat_src = &entry.shadow_map[..];
+            let flat_dst: &mut [f32] = bytemuck::cast_slice_mut(&mut padded_shadows);
+            flat_dst[..289].copy_from_slice(flat_src);
+
             chunks_to_draw.push(GpuChunkData {
                 rel_pos: rel.as_vec3().extend(0.0),
                 lod_level: entry.lod_level as u32,
                 _padding: [0; 3],
                 height_map: GpuHeightMap {
                     data: padded_heights,
+                },
+                shadow_map: GpuShaowMap {
+                    data: padded_shadows,
                 },
             });
         }

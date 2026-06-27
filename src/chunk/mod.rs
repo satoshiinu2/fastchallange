@@ -21,7 +21,6 @@ pub struct ChunkManager {
 impl ChunkManager {
     pub const SIZE: usize = 16;
     pub const MESH_SIZE: usize = Self::SIZE + 1;
-    const MAX_REMOVALS_PER_FRAME: usize = 100;
 
     pub fn new() -> Self {
         Self {
@@ -68,15 +67,6 @@ impl ChunkManager {
         let should_gen = pos == final_snapped;
 
         return (final_snapped, lod_level, should_gen);
-    }
-
-    pub fn create_render_chunk(&mut self, entry: ChunkEntry) {
-        self.remove_render_chunk(entry.position);
-        self.entries.insert(entry.position, entry);
-    }
-
-    pub fn remove_render_chunk(&mut self, pos: SnappedChunkPos) -> bool {
-        self.entries.remove(&pos).is_some()
     }
 
     pub fn update_position(&mut self, pos: DVec3) {

@@ -64,7 +64,7 @@ impl GlobalState {
             .update_position(self.renderer.camera.position);
 
         self.chunk_manager
-            .flush_queues(&self.gpu_state, &self.renderer.terrain_pipeline);
+            .flush_queues();
 
         let raw_input = self.egui_state.take_egui_input(&self.window);
 
