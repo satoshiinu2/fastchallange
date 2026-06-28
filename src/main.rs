@@ -89,7 +89,7 @@ impl GlobalState {
                 ui.add_space(8.0);
 
                 ui.label(format!("Position: {:.1}", self.renderer.camera.position));
-                ui.label(format!("Velocity: {:.1}", self.renderer.camera.velocity));
+                ui.label(format!("Velocity: {:.1} ({:.1} m/s)", self.renderer.camera.velocity,self.renderer.camera.velocity.length()));
                 ui.add_space(8.0);
 
                 ui.label(format!(
