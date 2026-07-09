@@ -31,14 +31,14 @@ struct MapGenResult {
 impl ChunkGenerator {
     const CONTINENT_FREQ: f32 = 0.0003;
     const DETAIL_FREQ: f32 = 0.003;
-    const MASK_FREQ: f32 = 0.15;
-    const RIDGE_FREQ: f32 = 0.01;
+    const MASK_FREQ: f32 = 0.3;
+    const RIDGE_FREQ: f32 = 0.02;
     const CONTIENT_SCALE: f32 = 120.0;
     const SEA_OFFSET: f32 = -120.0;
     const MOUNT_MAX: f32 = 100.0;
     const DETAIL_POWER: f32 = 20.0;
     const MASK_POW: f32 = 6.0;
-    const RIDGE_POW: f32 = 4.0;
+    const RIDGE_POW: f32 = 3.0;
 
     pub fn new() -> Self {
         let seed = SystemTime::now()

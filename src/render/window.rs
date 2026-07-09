@@ -23,7 +23,7 @@ impl ApplicationHandler for App {
             return;
         }
 
-        let window_attributes = WindowAttributes::default().with_title("coresealed-rs");
+        let window_attributes = WindowAttributes::default().with_title("fastchallange");
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
 
         let gpu_state = pollster::block_on(create_gpu_state(window.clone()));
