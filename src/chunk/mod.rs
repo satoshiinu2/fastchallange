@@ -87,6 +87,68 @@ impl ChunkManager {
         self.rebuild_full();
     }
 
+    pub fn sample_terrain_height(&self, world_x: f64, world_z: f64) -> Option<f64> {
+        let chunk_x = (world_x / Self::SIZE as f64).floor() as i64;
+        let chunk_z = (world_z / Self::SIZE as f64).floor() as i64;
+        let point = ChunkPos::new(chunk_x, chunk_z);
+
+        for lod_level in 0..=5 {
+            let mask = !((1i64 << lod_level) - 1);
+            let snapped = point.bit_and(mask);
+            let key = SnappedChunkPos(snapped);
+            if let Some(entry) = self.entries.get(&key) {
+                if let Some(height) = self.sample_entry_height(entry, world_x, world_z) {
+                    return Some(height);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn sample_entry_height(&self, entry: &ChunkEntry, world_x: f64, world_z: f64) -> Option<f64> {
+        let scale = 1u32 << entry.lod_level;
+        let origin_x = entry.position.0.x as f64 * Self::SIZE as f64;
+        let origin_z = entry.position.0.z as f64 * Self::SIZE as f64;
+        let local_x = world_x - origin_x;
+        let local_z = world_z - origin_z;
+        let total_size = Self::SIZE as f64 * scale as f64;
+
+        if local_x < 0.0 || local_x > total_size || local_z < 0.0 || local_z > total_size {
+            return None;
+        }
+
+        let mesh_size = Self::MESH_SIZE;
+        let frac_x = (local_x / scale as f64).clamp(0.0, Self::SIZE as f64);
+        let frac_z = (local_z / scale as f64).clamp(0.0, Self::SIZE as f64);
+        let x0 = frac_x.floor() as usize;
+        let z0 = frac_z.floor() as usize;
+        let x0 = x0.min(mesh_size - 2);
+        let z0 = z0.min(mesh_size - 2);
+        let tx = (frac_x - x0 as f64) as f32;
+        let tz = (frac_z - z0 as f64) as f32;
+
+        let i00 = z0 * mesh_size + x0;
+        let i10 = i00 + 1;
+        let i01 = (z0 + 1) * mesh_size + x0;
+        let i11 = i01 + 1;
+
+        let h00 = entry.height_map[i00] as f64;
+        let h10 = entry.height_map[i10] as f64;
+        let h01 = entry.height_map[i01] as f64;
+        let h11 = entry.height_map[i11] as f64;
+
+        let h0 = h00 * (1.0 - tx as f64) + h10 * tx as f64;
+        let h1 = h01 * (1.0 - tx as f64) + h11 * tx as f64;
+
+        Some(h0 * (1.0 - tz as f64) + h1 * tz as f64)
+    }
+
+    pub fn sample_height_clamped(&self, world_x: f64, world_z: f64) -> f64 {
+        self.sample_terrain_height(world_x, world_z)
+            .unwrap_or(-1.0e6)
+    }
+
     pub fn rebuild_full(&mut self) {
         let Some(center) = self.last_updated_pos else {
             return;
@@ -116,14 +178,11 @@ impl ChunkManager {
             }
         }
 
-        // いらないのは消す
         self.entries.retain(|k, _| needed.contains(k));
     }
 
     /// 指定した最大半径（距離）までに生成されるチャンク数の概算を返す O(1) の関数
     pub fn estimate_generated_chunks(&self) -> usize {
-        // 各LOD帯: [inner, outer) の正方形リング面積 / step^2
-        // 面積 = (2*outer+1)^2 - (2*inner+1)^2  ← 正方形の場合
         let area = |inner: i64, outer: i64| -> i64 {
             let o = (2 * outer + 1).pow(2);
             let i = if inner > 0 { (2 * inner + 1).pow(2) } else { 0 };
@@ -131,11 +190,11 @@ impl ChunkManager {
         };
 
         let r = self.radius;
-        let lod0 = area(0, 7.min(r)) / 1; // step=1
-        let lod1 = area(8, 15.min(r).max(7)) / 4; // step=2
-        let lod2 = area(16, 31.min(r).max(15)) / 16; // step=4
-        let lod3 = area(32, 63.min(r).max(31)) / 64; // step=8
-        let lod4 = area(64, r.max(63)) / 256; // step=16
+        let lod0 = area(0, 7.min(r)) / 1;
+        let lod1 = area(8, 15.min(r).max(7)) / 4;
+        let lod2 = area(16, 31.min(r).max(15)) / 16;
+        let lod3 = area(32, 63.min(r).max(31)) / 64;
+        let lod4 = area(64, r.max(63)) / 256;
 
         (lod0 + lod1 + lod2 + lod3 + lod4).max(0) as usize
     }

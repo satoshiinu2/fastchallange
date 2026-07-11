@@ -30,20 +30,24 @@ mod render;
 pub struct GlobalState {
     window: Arc<Window>,
     gpu_state: GpuState,
+
     player: Player,
     renderer: Renderer,
     chunk_manager: ChunkManager,
     perf_man: PerformanceManagers,
     key_bindings: KeyBindings,
+
     last_frame_time: Instant,
+    was_changed_render_distance: AtomicU8,
+
     cursor_locked: bool,
     camera_mode: CameraMode,
     camera_distance: f32,
+    acceleration_rate: f64,
+    do_collision_check: bool,
 
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
-    was_changed_render_distance: AtomicU8,
-    acceleration_rate: f64,
 }
 impl GlobalState {
     const CHUNK_MIN: i64 = 50;
@@ -83,6 +87,7 @@ impl GlobalState {
             camera_distance: 5.0,
             acceleration_rate: 100.0,
             was_changed_render_distance: AtomicU8::new(0),
+            do_collision_check: true,
             egui_ctx,
             egui_state,
         })
@@ -93,9 +98,13 @@ impl GlobalState {
         let dt = now.duration_since(self.last_frame_time).as_secs_f32(); // 秒単位のt
         self.last_frame_time = now;
 
-        let acceleration =
-            self.player
-                .physics_update(&self.key_bindings, self.acceleration_rate, dt);
+        let acceleration = self.player.physics_update(
+            &self.key_bindings,
+            self.acceleration_rate,
+            dt,
+            &self.chunk_manager,
+            self.do_collision_check,
+        );
 
         self.player
             .flight_animation
@@ -164,6 +173,11 @@ impl GlobalState {
                     )
                     .text("Camera distance"),
                 );
+
+                ui.add(egui::Checkbox::new(
+                    &mut self.do_collision_check,
+                    "Collision",
+                ));
             });
         });
 

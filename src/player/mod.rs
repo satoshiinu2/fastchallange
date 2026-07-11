@@ -1,6 +1,8 @@
 use glam::{DVec3, Vec3};
 
-use crate::{key::KeyBindings, render::anim::FlightAnimation};
+use crate::{chunk::ChunkManager, key::KeyBindings, render::anim::FlightAnimation};
+
+mod collision;
 
 pub struct Player {
     pub position: DVec3,
@@ -25,8 +27,11 @@ impl Player {
         key_bind: &KeyBindings,
         acceleration_rate: f64,
         dt: f32,
+        chunk_manager: &ChunkManager,
+        do_collision_check: bool,
     ) -> DVec3 {
         let dt = dt as f64;
+        let previous_position = self.position;
         let mut input_vec: Vec3 = Vec3::ZERO;
 
         if key_bind.right.is_down {
@@ -62,6 +67,9 @@ impl Player {
 
         // 速度を位置に足す (p = p0 + v * t)
         self.position += self.velocity * dt;
+        if do_collision_check {
+            collision::resolve_heightmap_collision(self, chunk_manager, previous_position);
+        }
 
         // 操作されていなかったら減速
         let friction = 5.0;
