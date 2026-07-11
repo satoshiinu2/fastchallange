@@ -74,9 +74,10 @@ fn horizontal_push_out(
     push
 }
 fn resolve_axis_step(
+    chunk_manager: &ChunkManager,
     previous_position: DVec3,
     candidate_position: DVec3,
-    chunk_manager: &ChunkManager,
+    capsule: CapsuleCollision,
 ) -> DVec3 {
     if let Some(ground) =
         ground_height_at_center(chunk_manager, candidate_position.x, candidate_position.z)
@@ -86,8 +87,11 @@ fn resolve_axis_step(
                 .unwrap_or(ground);
         let rise = ground - prev_ground;
 
-        if rise > MAX_STEP_UP + GROUND_EPSILON {
-            // この軸の移動だけをキャンセル
+        let bottom_y = previous_position.y - capsule.height * 0.5 + capsule.radius;
+        let penetration = ground - bottom_y;
+
+        if penetration > MAX_STEP_UP + GROUND_EPSILON {
+            // 実際に胴体より高い壁に本当にぶつかる場合だけブロック
             return previous_position;
         }
     }
@@ -102,15 +106,17 @@ fn resolve_step_position(
 ) -> DVec3 {
     // 軸を単独で解決
     let after_x = resolve_axis_step(
+        chunk_manager,
         previous_position,
         DVec3::new(desired_position.x, previous_position.y, previous_position.z),
-        chunk_manager,
+        capsule,
     );
 
     let after_z = resolve_axis_step(
+        chunk_manager,
         after_x,
         DVec3::new(after_x.x, previous_position.y, desired_position.z),
-        chunk_manager,
+        capsule,
     );
 
     let mut candidate = DVec3::new(after_z.x, desired_position.y, after_z.z);
