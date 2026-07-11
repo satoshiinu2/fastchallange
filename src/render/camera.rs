@@ -25,8 +25,6 @@ pub struct Camera {
 }
 
 impl Camera {
-    const DISTANCE: f32 = 5.0;
-
     pub fn new() -> Self {
         Self {
             position: DVec3::ZERO,
@@ -43,7 +41,7 @@ impl Camera {
         mat
     }
 
-    pub fn update_position(&mut self, player: &Player, mode: CameraMode) {
+    pub fn update_position(&mut self, player: &Player, mode: CameraMode, distance: f32) {
         match mode {
             CameraMode::FirstPerson => {
                 self.position = player.position;
@@ -53,7 +51,7 @@ impl Camera {
             CameraMode::ThirdPerson => {
                 let rotation = Self::deg_to_quat(player.rotation);
 
-                let offset = rotation * Vec3::Z * Self::DISTANCE;
+                let offset = rotation * Vec3::Z * distance;
 
                 self.position = player.position - offset.as_dvec3();
 

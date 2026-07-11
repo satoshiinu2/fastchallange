@@ -246,7 +246,7 @@ impl Renderer {
                 self.render_terrain(&gpu_state, chunk_manager, &mut pass, vp);
 
                 // モデル描画
-                if camera_mode != CameraMode::FirstPerson {
+                if camera_mode == CameraMode::ThirdPerson {
                     self.render_models(&gpu_state, player, &mut pass, vp);
                 }
 

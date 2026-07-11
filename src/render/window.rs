@@ -77,6 +77,9 @@ impl ApplicationHandler for App {
                         WindowEvent::MouseInput { state, button, .. } => {
                             global_state.handle_mouse_input(state, button);
                         }
+                        WindowEvent::MouseWheel { delta, .. } => {
+                            global_state.handle_mouse_wheel(delta);
+                        }
                         _ => {}
                     }
                 }

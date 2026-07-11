@@ -8,7 +8,7 @@ use std::{
 
 use anyhow::Result;
 use winit::{
-    event::{ElementState, MouseButton},
+    event::{ElementState, MouseButton, MouseScrollDelta},
     keyboard::{KeyCode, PhysicalKey},
     window::{CursorGrabMode, Window},
 };
@@ -38,6 +38,7 @@ pub struct GlobalState {
     last_frame_time: Instant,
     cursor_locked: bool,
     camera_mode: CameraMode,
+    camera_distance: f32,
 
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -45,6 +46,13 @@ pub struct GlobalState {
     acceleration_rate: f64,
 }
 impl GlobalState {
+    const CHUNK_MIN: i64 = 50;
+    const CHUNK_MAX: i64 = 300;
+    const ACCEL_MIN: f64 = 10.0;
+    const ACCEL_MAX: f64 = 300.0;
+    const CAM_DIST_MIN: f32 = 1.0;
+    const CAM_DIST_MAX: f32 = 100.0;
+
     fn new(window: Arc<Window>, gpu_state: GpuState) -> Result<Self> {
         let chunk_manager = ChunkManager::new();
         let renderer = Renderer::new(&gpu_state, chunk_manager.estimate_generated_chunks())?;
@@ -72,6 +80,7 @@ impl GlobalState {
             last_frame_time: Instant::now(),
             cursor_locked: false,
             camera_mode: CameraMode::default(),
+            camera_distance: 5.0,
             acceleration_rate: 100.0,
             was_changed_render_distance: AtomicU8::new(0),
             egui_ctx,
@@ -94,7 +103,7 @@ impl GlobalState {
 
         self.renderer
             .camera
-            .update_position(&self.player, self.camera_mode);
+            .update_position(&self.player, self.camera_mode, self.camera_distance);
 
         self.chunk_manager
             .update_position(self.renderer.camera.position);
@@ -129,23 +138,32 @@ impl GlobalState {
                 ));
 
                 ui.add(
-                    egui::Slider::new(&mut self.acceleration_rate, 50.0..=500.0)
-                        .text("Acceleration rate"),
+                    egui::Slider::new(
+                        &mut self.acceleration_rate,
+                        Self::ACCEL_MIN..=Self::ACCEL_MAX,
+                    )
+                    .text("Acceleration rate"),
                 );
 
-                const CHUNK_MIN: i64 = 50;
-                const CHUNK_MAX: i64 = 300;
-
-                let response = ui.add(
-                    egui::Slider::new(&mut self.chunk_manager.radius, CHUNK_MIN..=CHUNK_MAX)
-                        .text("Render distance"),
+                let r_dis_res = ui.add(
+                    egui::Slider::new(
+                        &mut self.chunk_manager.radius,
+                        Self::CHUNK_MIN..=Self::CHUNK_MAX,
+                    )
+                    .text("Render distance"),
                 );
 
-                self.chunk_manager.radius = self.chunk_manager.radius.clamp(CHUNK_MIN, CHUNK_MAX);
-
-                if response.changed() {
+                if r_dis_res.changed() {
                     self.was_changed_render_distance.store(1, Ordering::Relaxed);
                 }
+
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.camera_distance,
+                        Self::CAM_DIST_MIN..=Self::CAM_DIST_MAX,
+                    )
+                    .text("Camera distance"),
+                );
             });
         });
 
@@ -209,6 +227,21 @@ impl GlobalState {
 
             // クランプ処理
             self.player.rotation.x = self.player.rotation.x.clamp(-89.0, 89.0);
+        }
+    }
+
+    pub fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) {
+        if self.cursor_locked && self.camera_mode == CameraMode::ThirdPerson {
+            let scroll_amount = match delta {
+                MouseScrollDelta::LineDelta(_, y) => y,
+                MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
+            };
+
+            self.camera_distance -= scroll_amount * 0.5;
+
+            self.camera_distance = self
+                .camera_distance
+                .clamp(Self::CAM_DIST_MIN, Self::CAM_DIST_MAX);
         }
     }
 
