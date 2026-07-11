@@ -28,7 +28,10 @@ impl ApplicationHandler for App {
 
         let gpu_state = pollster::block_on(create_gpu_state(window.clone()));
 
-        self.global_state = Some(GlobalState::new(window, gpu_state));
+        self.global_state = Some(
+            GlobalState::new(window, gpu_state)
+                .unwrap_or_else(|e| panic!("global state init failed: {}", e)),
+        );
     }
 
     fn window_event(
@@ -43,7 +46,7 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
-    self.global_state = None;
+                self.global_state = None;
                 event_loop.exit();
             }
 

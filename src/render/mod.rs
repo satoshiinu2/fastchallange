@@ -1,43 +1,56 @@
 use std::borrow::Cow;
 
+use anyhow::Result;
 use egui::FullOutput;
 use glam::Mat4;
 use wgpu::{
-    CurrentSurfaceTexture::Success, Device, ShaderModule, ShaderModuleDescriptor, ShaderSource,
-    Texture, TextureView,
+    CurrentSurfaceTexture::Success, Device, RenderPass, ShaderModule, ShaderModuleDescriptor,
+    ShaderSource, Texture, TextureView,
 };
 
 use crate::{
     chunk::ChunkManager,
-    key::KeyBindings,
     perf::PerformanceManagers,
+    player::Player,
     render::{
-        camera::Camera,
+        camera::{Camera, CameraMode},
+        model::{
+            ModelPipeline,
+            loader::{Model, ModelInstance},
+        },
         terrain::{GpuChunkData, GpuHeightMap, GpuShaowMap, TerrainPipeline},
     },
 };
 
+pub mod anim;
 pub mod camera;
+pub mod model;
 pub mod terrain;
+pub mod vertex;
 pub mod window;
 
 pub struct Renderer {
-    aspect_ratio: f32,
-    pub(crate) depth_texture_view: Option<TextureView>,
-    depth_texture: Option<Texture>,
-    pub(crate) camera: Camera,
+    pub aspect_ratio: f32,
+    pub depth_texture_view: Option<TextureView>,
+    pub depth_texture: Option<Texture>,
+    pub camera: Camera,
 
     terrain_pipeline: TerrainPipeline,
     terrain_shader: ShaderModule,
+    model_pipeline: ModelPipeline,
+    _model_shader: ShaderModule,
+
+    player_model: Model,
+    player_model_instance: ModelInstance,
 
     egui_renderer: egui_wgpu::Renderer,
 }
 
 impl Renderer {
-    pub fn new(gpu_state: &GpuState, max_chunks: usize) -> Self {
+    pub fn new(gpu_state: &GpuState, max_chunks: usize) -> Result<Self> {
         let terrain_shader = Self::create_shader_module(
             &gpu_state.device,
-            include_str!("../shader/terrain.wgsl"),
+            include_str!("../assets/terrain.wgsl"),
             Some("Terrain Shader"),
         );
 
@@ -48,6 +61,15 @@ impl Renderer {
             max_chunks,
         );
 
+        let model_shader = Self::create_shader_module(
+            &gpu_state.device,
+            include_str!("../assets/model.wgsl"),
+            Some("Model Shader"),
+        );
+
+        let model_pipeline =
+            ModelPipeline::new(&gpu_state.device, &model_shader, gpu_state.config.format);
+
         let egui_renderer = egui_wgpu::Renderer::new(
             &gpu_state.device,
             gpu_state.config.format,
@@ -56,15 +78,29 @@ impl Renderer {
             },
         );
 
-        Self {
+        let player_model = Model::load_glb(
+            include_bytes!("../assets/model.vrm"),
+            &gpu_state.device,
+            &gpu_state.queue,
+            &model_pipeline.texture_bgl,
+        )?;
+
+        let player_model_instance =
+            ModelInstance::new(&gpu_state.device, &model_pipeline.m_matrix_bgl);
+
+        Ok(Self {
             aspect_ratio: 1.0,
             depth_texture_view: None,
             depth_texture: None,
             camera: Camera::new(),
             terrain_pipeline,
             terrain_shader,
+            model_pipeline,
+            _model_shader: model_shader,
+            player_model,
             egui_renderer,
-        }
+            player_model_instance,
+        })
     }
 
     pub fn rebuild_terrain_pipeline(&mut self, gpu_state: &GpuState, max_chunks: usize) {
@@ -114,6 +150,8 @@ impl Renderer {
         perf_man: &mut PerformanceManagers,
         gpu_state: &GpuState,
         chunk_manager: &ChunkManager,
+        player: &Player,
+        camera_mode: CameraMode,
         egui_ctx: &egui::Context,
         egui_state: &mut egui_winit::State,
         window: &winit::window::Window,
@@ -169,14 +207,51 @@ impl Renderer {
                     &screen_descriptor,
                 );
 
-                // 地形描画
-                self.render_terrain(
-                    &gpu_state,
-                    &surface_view,
-                    &depth_view,
-                    chunk_manager,
-                    &mut encoder,
+                let p = Mat4::perspective_infinite_lh(
+                    self.camera.fov.to_radians(),
+                    self.aspect_ratio,
+                    0.1,
                 );
+                let vp = p * self.camera.get_v_matrix();
+
+                // 3. レンダーパスを開始（元のシンプルな構造に戻す）
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("Main Render Pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &surface_view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: 0.1,
+                                g: 0.2,
+                                b: 0.3,
+                                a: 1.0,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+
+                // 地形描画
+                self.render_terrain(&gpu_state, chunk_manager, &mut pass, vp);
+
+                // モデル描画
+                if camera_mode != CameraMode::FirstPerson {
+                    self.render_models(&gpu_state, player, &mut pass, vp);
+                }
+
+                // ここで使わなくなるのでドロップする
+                drop(pass);
 
                 // egui描画パス（地形の後）
                 {
@@ -218,17 +293,13 @@ impl Renderer {
     fn render_terrain(
         &self,
         gpu_state: &GpuState,
-        surface_view: &wgpu::TextureView,
-        depth_texture_view: &wgpu::TextureView,
         chunk_manager: &ChunkManager,
-        encoder: &mut wgpu::CommandEncoder,
+        pass: &mut RenderPass,
+        vp_mat: Mat4,
     ) {
-        let p = Mat4::perspective_infinite_lh(self.camera.fov.to_radians(), self.aspect_ratio, 0.1);
-        let vp = p * self.camera.get_v_matrix();
+        self.terrain_pipeline.update_vp(&gpu_state.queue, &vp_mat);
 
-        self.terrain_pipeline.update_vp(&gpu_state.queue, &vp);
-
-        // 1. 存在する全チャンクのデータを1つの大きなVecに一気に回収する
+        // チャンクのデータを集めてまとめる
         let mut chunks_to_draw = Vec::new();
         for entry in chunk_manager.entries.values() {
             if chunks_to_draw.len() >= TerrainPipeline::MAX_CHUNKS_PER_DRAW {
@@ -254,44 +325,14 @@ impl Renderer {
 
         let total_chunks = chunks_to_draw.len() as u32;
 
-        // 2. 集まった全データを「1回だけ」でバッファに一括転送
+        // バッファに一括転送
         if total_chunks > 0 {
             gpu_state.queue.write_buffer(
                 &self.terrain_pipeline.global_chunks_buffer,
                 0,
                 bytemuck::cast_slice(&chunks_to_draw),
             );
-        }
 
-        // 3. レンダーパスを開始（元のシンプルな構造に戻す）
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("Main Render Pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: surface_view,
-                resolve_target: None,
-                depth_slice: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.1,
-                        g: 0.2,
-                        b: 0.3,
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_texture_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            ..Default::default()
-        });
-
-        if total_chunks > 0 {
             pass.set_pipeline(&self.terrain_pipeline.pipeline);
             pass.set_index_buffer(
                 self.terrain_pipeline.index_buffer.slice(..),
@@ -299,13 +340,41 @@ impl Renderer {
             );
             pass.set_bind_group(0, &self.terrain_pipeline.global_bind_group, &[]);
 
-            // 💥 全体のチャンク数（total_chunks）を指定して「たった1回」描画を呼び出す！
             pass.draw_indexed(0..self.terrain_pipeline.index_count, 0, 0..total_chunks);
         }
-        drop(pass);
     }
-    pub fn physics_update(&mut self, key_bind: &KeyBindings, acceleration_rate: f64, dt: f64) {
-        self.camera.physics_update(key_bind, acceleration_rate, dt);
+
+    fn render_models(
+        &self,
+        gpu_state: &GpuState,
+        player: &Player,
+        pass: &mut RenderPass,
+        vp_mat: Mat4,
+    ) {
+        let model_transform = {
+            let rotation = player.flight_animation.rotation_quat();
+            let mut t = Mat4::IDENTITY;
+
+            t *= Mat4::from_translation((player.position - self.camera.position).as_vec3());
+            t *= Mat4::from_quat(rotation);
+
+            t
+        };
+
+        self.model_pipeline.update_vp(&gpu_state.queue, &vp_mat);
+        self.player_model_instance
+            .update(&gpu_state.queue, &model_transform);
+
+        pass.set_pipeline(&self.model_pipeline.pipeline);
+        pass.set_bind_group(0, &self.model_pipeline.vp_matrix_bind_group, &[]);
+        pass.set_bind_group(1, &self.player_model_instance.m_bind_group, &[]);
+
+        for prim in &self.player_model.primitives {
+            pass.set_bind_group(2, &prim.texture_bind_group, &[]);
+            pass.set_vertex_buffer(0, prim.vertex_buffer.slice(..));
+            pass.set_index_buffer(prim.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..prim.index_count, 0, 0..1);
+        }
     }
 }
 

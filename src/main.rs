@@ -6,29 +6,38 @@ use std::{
     time::Instant,
 };
 
-use winit::window::Window;
+use anyhow::Result;
+use winit::{
+    event::{ElementState, MouseButton},
+    keyboard::{KeyCode, PhysicalKey},
+    window::{CursorGrabMode, Window},
+};
 
 use crate::{
     chunk::ChunkManager,
     key::KeyBindings,
     perf::PerformanceManagers,
-    render::{GpuState, Renderer, window::run_client},
+    player::Player,
+    render::{GpuState, Renderer, camera::CameraMode, window::run_client},
 };
 
 mod chunk;
 mod key;
 mod perf;
+mod player;
 mod render;
 
 pub struct GlobalState {
     window: Arc<Window>,
     gpu_state: GpuState,
+    player: Player,
     renderer: Renderer,
     chunk_manager: ChunkManager,
     perf_man: PerformanceManagers,
     key_bindings: KeyBindings,
     last_frame_time: Instant,
     cursor_locked: bool,
+    camera_mode: CameraMode,
 
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -36,9 +45,9 @@ pub struct GlobalState {
     acceleration_rate: f64,
 }
 impl GlobalState {
-    fn new(window: Arc<Window>, gpu_state: GpuState) -> Self {
+    fn new(window: Arc<Window>, gpu_state: GpuState) -> Result<Self> {
         let chunk_manager = ChunkManager::new();
-        let renderer = Renderer::new(&gpu_state, chunk_manager.estimate_generated_chunks());
+        let renderer = Renderer::new(&gpu_state, chunk_manager.estimate_generated_chunks())?;
         let perf_man = PerformanceManagers::new();
         let key_bindings = KeyBindings::new();
 
@@ -52,29 +61,40 @@ impl GlobalState {
             None,
         );
 
-        Self {
+        Ok(Self {
             window,
             gpu_state,
+            player: Player::new(),
             renderer,
             chunk_manager,
             perf_man,
             key_bindings,
             last_frame_time: Instant::now(),
             cursor_locked: false,
+            camera_mode: CameraMode::default(),
             acceleration_rate: 100.0,
             was_changed_render_distance: AtomicU8::new(0),
             egui_ctx,
             egui_state,
-        }
+        })
     }
 
     fn update(&mut self) {
         let now = Instant::now();
-        let dt = now.duration_since(self.last_frame_time).as_secs_f64(); // 秒単位のt
+        let dt = now.duration_since(self.last_frame_time).as_secs_f32(); // 秒単位のt
         self.last_frame_time = now;
 
+        let acceleration =
+            self.player
+                .physics_update(&self.key_bindings, self.acceleration_rate, dt);
+
+        self.player
+            .flight_animation
+            .update(self.player.velocity, acceleration, dt);
+
         self.renderer
-            .physics_update(&self.key_bindings, self.acceleration_rate, dt);
+            .camera
+            .update_position(&self.player, self.camera_mode);
 
         self.chunk_manager
             .update_position(self.renderer.camera.position);
@@ -88,8 +108,12 @@ impl GlobalState {
                 ui.label(format!("FPS: {:.1}", 1.0 / dt));
                 ui.add_space(8.0);
 
-                ui.label(format!("Position: {:.1}", self.renderer.camera.position));
-                ui.label(format!("Velocity: {:.1} ({:.1} m/s)", self.renderer.camera.velocity,self.renderer.camera.velocity.length()));
+                ui.label(format!("Position: {:.1}", self.player.position));
+                ui.label(format!(
+                    "Velocity: {:.1} ({:.1} m/s)",
+                    self.player.velocity,
+                    self.player.velocity.length()
+                ));
                 ui.add_space(8.0);
 
                 ui.label(format!(
@@ -133,6 +157,8 @@ impl GlobalState {
             &mut self.perf_man,
             &self.gpu_state,
             &self.chunk_manager,
+            &self.player,
+            self.camera_mode,
             &self.egui_ctx,
             &mut self.egui_state,
             &self.window,
@@ -150,32 +176,27 @@ impl GlobalState {
         self.renderer.resize(width, height, &self.gpu_state.device);
     }
 
-    fn key_down(&mut self, key: winit::keyboard::PhysicalKey) {
+    fn key_down(&mut self, key: PhysicalKey) {
         self.key_bindings.on_key_change::<true>(key);
 
-        if let winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) = key {
-            let _ = self
-                .window
-                .set_cursor_grab(winit::window::CursorGrabMode::None);
+        if let PhysicalKey::Code(KeyCode::Escape) = key {
+            let _ = self.window.set_cursor_grab(CursorGrabMode::None);
             let _ = self.window.set_cursor_visible(true);
             self.cursor_locked = false;
         }
+
+        if let PhysicalKey::Code(KeyCode::F5) = key {
+            self.camera_mode.toggle();
+        }
     }
 
-    fn key_up(&mut self, key: winit::keyboard::PhysicalKey) {
+    fn key_up(&mut self, key: PhysicalKey) {
         self.key_bindings.on_key_change::<false>(key);
     }
 
-    pub fn handle_mouse_input(
-        &mut self,
-        state: winit::event::ElementState,
-        button: winit::event::MouseButton,
-    ) {
-        if state == winit::event::ElementState::Pressed && button == winit::event::MouseButton::Left
-        {
-            let _ = self
-                .window
-                .set_cursor_grab(winit::window::CursorGrabMode::Confined);
+    pub fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
+        if state == ElementState::Pressed && button == MouseButton::Left {
+            let _ = self.window.set_cursor_grab(CursorGrabMode::Confined);
             let _ = self.window.set_cursor_visible(false);
             self.cursor_locked = true;
         }
@@ -183,11 +204,11 @@ impl GlobalState {
 
     pub fn handle_mouse_motion(&mut self, delta_x: f64, delta_y: f64) {
         if self.cursor_locked {
-            self.renderer.camera.rotation.y += delta_x as f32 * 0.1;
-            self.renderer.camera.rotation.x += delta_y as f32 * 0.1;
+            self.player.rotation.y += delta_x as f32 * 0.1;
+            self.player.rotation.x += delta_y as f32 * 0.1;
 
             // クランプ処理
-            self.renderer.camera.rotation.x = self.renderer.camera.rotation.x.clamp(-89.0, 89.0);
+            self.player.rotation.x = self.player.rotation.x.clamp(-89.0, 89.0);
         }
     }
 
